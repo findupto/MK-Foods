@@ -9,11 +9,13 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "install-app": "npm install --include=dev",
+    "install-app": "npm install --omit=dev",
     "build": "electron-builder"
   },
+  "dependencies": {
+    "electron": "38.0.0"
+  },
   "devDependencies": {
-    "electron": "38.0.0",
     "electron-builder": "26.0.0"
   },
   "build": {
