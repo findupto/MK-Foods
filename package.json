@@ -1,0 +1,25 @@
+{
+  "name": "mk-foods-pos",
+  "version": "0.1.0",
+  "description": "Offline-first Enterprise POS for MK Pizza & Ice Bar",
+  "main": "src/main.js",
+  "author": "MK Foods",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "pk.mkfoods.pos",
+    "productName": "MK Foods POS",
+    "files": ["src/**/*", "modules/**/*", "docs/**/*", "package.json"],
+    "directories": {"output": "dist"},
+    "win": {"target": "nsis"},
+    "linux": {"target": "AppImage"}
+  }
+}
