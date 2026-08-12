@@ -13,11 +13,11 @@ if errorlevel 1 (
 )
 
 if not exist "node_modules\electron\cli.js" (
-  echo Electron is not installed. Installing project dependencies...
-  call npm install --include=dev
+  echo Electron is not installed. Installing POS runtime dependencies...
+  call npm install --omit=dev
   if errorlevel 1 (
     echo.
-    echo ERROR: Could not install dependencies.
+    echo ERROR: Could not install POS runtime dependencies.
     pause
     exit /b 1
   )
