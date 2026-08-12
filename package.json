@@ -2,28 +2,18 @@
   "name": "mk-foods-pos",
   "version": "0.1.0",
   "description": "Offline-first Enterprise POS for MK Pizza & Ice Bar",
-  "main": "src/main.js",
+  "main": "src/renderer/index.html",
   "author": "MK Foods",
   "license": "MIT",
   "private": true,
   "scripts": {
-    "start": "electron .",
-    "dev": "electron .",
-    "install-app": "npm install --omit=dev",
-    "build": "electron-builder"
-  },
-  "dependencies": {
-    "electron": "38.0.0"
+    "start": "tauri dev",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "install-app": "npm install --include=dev"
   },
   "devDependencies": {
-    "electron-builder": "26.0.0"
-  },
-  "build": {
-    "appId": "pk.mkfoods.pos",
-    "productName": "MK Foods POS",
-    "files": ["src/**/*", "modules/**/*", "docs/**/*", "package.json"],
-    "directories": {"output": "dist"},
-    "win": {"target": "nsis"},
-    "linux": {"target": "AppImage"}
+    "@tauri-apps/cli": "^2.0.0"
   }
 }
