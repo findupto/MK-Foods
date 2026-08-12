@@ -1,5 +1,1 @@
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('mkFoods', {
-  getAppInfo: () => ipcRenderer.invoke('app:info')
-});
+const{contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('mkFoods',{getAppInfo:()=>ipcRenderer.invoke('app:info'),login:(u,p)=>ipcRenderer.invoke('auth:login',u,p),snapshot:()=>ipcRenderer.invoke('db:snapshot'),createOrder:o=>ipcRenderer.invoke('orders:create',o),audit:e=>ipcRenderer.invoke('audit:add',e),updateSettings:s=>ipcRenderer.invoke('settings:update',s)});
