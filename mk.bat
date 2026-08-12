@@ -82,9 +82,7 @@ REM Use SVG as the reliable source; Tauri converts SVG to every required platfor
 >"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="white"/^>^<text x="512" y="650" text-anchor="middle" font-family="Arial,Segoe UI,sans-serif" font-size="390" font-weight="700" fill="black"^>MK^</text^>^</svg^>
 if not exist "src-tauri\icons\mk-foods-icon.svg" goto :icon_error
 
-REM Convert SVG to PNG with PowerShell only when available; otherwise Tauri can consume the SVG directly.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Drawing; $svg=Get-Content -Raw 'src-tauri\icons\mk-foods-icon.svg'; if (Get-Command magick -ErrorAction SilentlyContinue) { magick 'src-tauri\icons\mk-foods-icon.svg' -background white -resize 1024x1024 'src-tauri\icons\icon.png' } elseif (Get-Command rsvg-convert -ErrorAction SilentlyContinue) { rsvg-convert -w 1024 -h 1024 'src-tauri\icons\mk-foods-icon.svg' -o 'src-tauri\icons\icon.png' }"
-
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; if (Get-Command magick -ErrorAction SilentlyContinue) { magick 'src-tauri\icons\mk-foods-icon.svg' -background white -resize 1024x1024 'src-tauri\icons\icon.png' } elseif (Get-Command rsvg-convert -ErrorAction SilentlyContinue) { rsvg-convert -w 1024 -h 1024 'src-tauri\icons\mk-foods-icon.svg' -o 'src-tauri\icons\icon.png' }"
 if not exist "src-tauri\icons\icon.png" (
   echo PNG converter unavailable. Installing/using Tauri SVG input directly...
   call npx --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
@@ -92,6 +90,12 @@ if not exist "src-tauri\icons\icon.png" (
   call npx --no-install tauri icon "src-tauri\icons\icon.png"
 )
 if errorlevel 1 goto :icon_error
+
+:repair
+echo.
+echo [6/8] Auto-repairing MK Foods Rust source...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='src-tauri\src\main.rs'; if(Test-Path $p){$s=Get-Content -Raw $p; $s=$s.Replace('x.insert(k.clone(),v.clone())}}arr(&mut s.db,\"audit\")','x.insert(k.clone(),v.clone());}}arr(&mut s.db,\"audit\")'); $s=$s.Replace('entry(k.clone()).or_insert(v.clone())}if let Some(ps)','entry(k.clone()).or_insert(v.clone());}if let Some(ps)'); $s=$s.Replace('json!(if status==\"completed\"{\"done\"}else{status.clone()})','json!(if status==\"completed\"{\"done\"}else{status.as_str()})'); Set-Content -Path $p -Value $s -Encoding UTF8 -NoNewline}"
+if errorlevel 1 goto :repair_error
 
 :metadata
 echo.
@@ -120,6 +124,11 @@ if "%EXITCODE%"=="0" exit /b 0
 echo.
 echo Tauri failed with code %EXITCODE%. Running automatic repair/check...
 call cargo check --manifest-path "src-tauri\Cargo.toml"
+if errorlevel 1 (
+  echo Rust check failed. Re-running automatic source repair...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='src-tauri\src\main.rs'; $s=Get-Content -Raw $p; $s=$s.Replace('x.insert(k.clone(),v.clone())}}arr(&mut s.db,\"audit\")','x.insert(k.clone(),v.clone());}}arr(&mut s.db,\"audit\")'); $s=$s.Replace('entry(k.clone()).or_insert(v.clone())}if let Some(ps)','entry(k.clone()).or_insert(v.clone());}if let Some(ps)'); $s=$s.Replace('json!(if status==\"completed\"{\"done\"}else{status.clone()})','json!(if status==\"completed\"{\"done\"}else{status.as_str()})'); Set-Content -Path $p -Value $s -Encoding UTF8 -NoNewline"
+  call cargo check --manifest-path "src-tauri\Cargo.toml"
+)
 call npm install --include=dev
 call npx --no-install tauri dev
 set "EXITCODE=%ERRORLEVEL%"
@@ -151,6 +160,10 @@ pause
 exit /b 1
 :icon_error
 echo ERROR: MK Foods Tauri icons could not be generated.
+pause
+exit /b 1
+:repair_error
+echo ERROR: Automatic Rust source repair failed.
 pause
 exit /b 1
 :cargo_error
