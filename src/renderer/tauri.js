@@ -5,12 +5,20 @@
   }
 
   const invoke = (command, args = {}) => tauri.core.invoke(command, args);
+  const safeAuth = async (command, args) => {
+    try {
+      return await invoke(command, args);
+    } catch (error) {
+      const reason = String(error?.message || error || 'AUTHENTICATION_ERROR');
+      return { ok: false, reason: reason.includes('INVALID') ? 'INVALID' : reason.includes('LOCKED') ? 'LOCKED' : reason.includes('FORBIDDEN') ? 'FORBIDDEN' : 'UNAUTHENTICATED' };
+    }
+  };
   const dialog = tauri.dialog;
 
   window.mkFoods = {
     getAppInfo: () => invoke('app_info'),
-    login: (u, p) => invoke('login', { u, p }),
-    pinLogin: (u, p) => invoke('pin_login', { u, p }),
+    login: (u, p) => safeAuth('login', { u, p }),
+    pinLogin: (u, p) => safeAuth('pin_login', { u, p }),
     logout: () => invoke('logout'),
     changePassword: (current, next) => invoke('change_password', { current, next }),
     resetPassword: (user, temp) => invoke('reset_password', { target: user, temp }),
