@@ -9,6 +9,7 @@
     "start": "tauri dev",
     "dev": "tauri dev",
     "build": "tauri build",
+    "build:windows": "tauri build --bundles nsis",
     "tauri": "tauri",
     "install-app": "npm install --include=dev"
   },
