@@ -25,13 +25,22 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "appimage"],
+    "targets": ["nsis"],
     "category": "Business",
+    "publisher": "MK Foods",
     "shortDescription": "Offline-first POS for MK Pizza & Ice Bar",
     "longDescription": "MK Foods offline-first point of sale application.",
+    "icon": ["icons/icon.ico"],
     "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "startMenuFolder": "MK Foods POS",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
       }
     }
   },
