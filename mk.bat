@@ -9,6 +9,9 @@ echo        MK FOODS POS - ONE CLICK
 echo ========================================
 echo.
 
+REM IMPORTANT: npm is a .cmd file on Windows and MUST be called from a .bat file.
+REM Otherwise Windows terminates this launcher immediately after npm --version.
+
 where node >nul 2>nul
 if errorlevel 1 goto :node_missing
 where npm >nul 2>nul
@@ -16,9 +19,10 @@ if errorlevel 1 goto :node_missing
 
 echo [1/8] Node.js / npm
 node --version
-npm --version
+call npm --version
+if errorlevel 1 goto :node_missing
 
-REM Rust must be available to Tauri. Install it automatically when possible.
+REM Rust / Cargo: use the existing per-user installation first.
 echo.
 echo [2/8] Rust / Cargo
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
@@ -45,7 +49,6 @@ if errorlevel 1 goto :rust_missing
 cargo --version
 rustc --version
 
-REM Make the MSVC toolchain explicit for Windows Tauri builds.
 where rustup >nul 2>nul
 if not errorlevel 1 rustup default stable-x86_64-pc-windows-msvc
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
@@ -61,7 +64,7 @@ if errorlevel 1 (
   if errorlevel 1 goto :npm_error
 )
 
-REM Verify Tauri CLI using the local project installation.
+REM Verify local Tauri CLI.
 echo.
 echo [4/8] Verifying Tauri CLI...
 if not exist "node_modules\@tauri-apps\cli" (
@@ -93,9 +96,10 @@ if errorlevel 1 (
   if errorlevel 1 goto :icon_error
 )
 
-REM Validate the exact command Tauri needs before launching.
+REM Validate the exact metadata command Tauri needs.
 echo.
 echo [7/8] Validating Cargo metadata...
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 where cargo >nul 2>nul
 if errorlevel 1 goto :rust_missing
 cargo metadata --no-deps --format-version 1 --manifest-path "src-tauri\Cargo.toml" >nul
@@ -130,13 +134,13 @@ pause
 exit /b %EXITCODE%
 
 :node_missing
-echo ERROR: Node.js/npm is missing. Install Node.js LTS and run this again.
+echo ERROR: Node.js/npm is missing or npm could not start.
+echo Install Node.js LTS and run this again.
 pause
 exit /b 1
 
 :rust_install_error
 echo ERROR: Automatic Rust installation failed.
-echo Please install Rust with the MSVC toolchain and run this again.
 pause
 exit /b 1
 
