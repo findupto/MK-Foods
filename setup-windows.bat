@@ -17,7 +17,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-
 where npm >nul 2>&1
 if errorlevel 1 (
   echo ERROR: npm is not available in PATH.
@@ -27,15 +26,39 @@ if errorlevel 1 (
 )
 
 echo Node.js:
-npm --version
 node --version
+npm --version
 
 echo.
-echo Installing MK Foods POS dependencies...
+echo Installing MK Foods POS dependencies from the npm registry...
 call npm install --include=dev
 if errorlevel 1 (
   echo.
   echo ERROR: Dependency installation failed.
+  echo.
+  echo If you see EALLOWGIT or a Git URL such as @electron/node-gyp,
+  echo your npm configuration/policy is blocking Git package downloads.
+  echo The project itself does not require a global Electron installation.
+  echo.
+  echo Run these diagnostics and review the output:
+  echo   npm config get git
+  echo   npm config get registry
+  echo   npm config get ignore-scripts
+  echo.
+  pause
+  exit /b 1
+)
+
+echo.
+echo Verifying local Electron...
+if not exist "node_modules\electron\cli.js" (
+  echo ERROR: Electron was not installed correctly.
+  pause
+  exit /b 1
+)
+call node_modules\.bin\electron.cmd --version
+if errorlevel 1 (
+  echo ERROR: Electron runtime verification failed.
   pause
   exit /b 1
 )
