@@ -6,7 +6,7 @@ title MK Foods POS - Setup
 
 echo.
 echo ========================================
-echo        MK FOODS POS - WINDOWS SETUP
+echo        MK FOODS POS - TAURI SETUP
 echo ========================================
 echo.
 
@@ -23,40 +23,33 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+where cargo >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: Rust/Cargo is not installed or not available in PATH.
+  echo Install Rust with the MSVC toolchain, then run this file again.
+  pause
+  exit /b 1
+)
 
 echo Node.js:
 node --version
+echo npm:
 npm --version
+echo Cargo:
+cargo --version
 
 echo.
-echo Installing MK Foods POS runtime from the npm registry...
-REM Runtime installation deliberately omits devDependencies.
-REM electron-builder pulls @electron/rebuild, whose historical versions use
-REM an Electron Git dependency. The POS runtime does not need electron-builder.
-call npm install --omit=dev
+echo Installing MK Foods POS Tauri dependencies...
+call npm install --include=dev
 if errorlevel 1 (
   echo.
-  echo ERROR: POS runtime installation failed.
+  echo ERROR: Tauri dependency installation failed.
   pause
   exit /b 1
 )
 
 echo.
-echo Verifying local Electron...
-if not exist "node_modules\electron\cli.js" (
-  echo ERROR: Electron was not installed correctly.
-  pause
-  exit /b 1
-)
-call node_modules\.bin\electron.cmd --version
-if errorlevel 1 (
-  echo ERROR: Electron runtime verification failed.
-  pause
-  exit /b 1
-)
-
-echo.
-echo Setup complete. Launching MK Foods POS...
+echo Starting MK Foods POS with Tauri...
 call npm start
 set EXITCODE=%ERRORLEVEL%
 if not "%EXITCODE%"=="0" (

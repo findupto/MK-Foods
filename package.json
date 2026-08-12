@@ -2,7 +2,6 @@
   "name": "mk-foods-pos",
   "version": "0.1.0",
   "description": "Offline-first Enterprise POS for MK Pizza & Ice Bar",
-  "main": "src/renderer/index.html",
   "author": "MK Foods",
   "license": "MIT",
   "private": true,
@@ -14,6 +13,6 @@
     "install-app": "npm install --include=dev"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "@tauri-apps/cli": "^2.11.4"
   }
 }
