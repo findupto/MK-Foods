@@ -1,45 +1,40 @@
-# MK Foods POS — Windows Setup
+# MK Foods POS - Windows Build
 
-## Requirements
+## One-click installer build
 
-Install:
+From the project folder, double-click:
 
-- Node.js LTS
-- Rust with the MSVC toolchain
-- Microsoft C++ Build Tools with **Desktop development with C++**
-- Microsoft Edge WebView2 (already present on most supported Windows 10/11 systems)
+`build-windows.bat`
 
-Tauri does **not** require Electron or a global Electron installation. See the official Tauri Windows prerequisites documentation for the current requirements.
+It automatically:
 
-## First run
+1. Adds the user Rust/Cargo directory to PATH for this build.
+2. Checks Node.js, npm, Cargo and Rustc.
+3. Installs/repairs the npm/Tauri dependencies.
+4. Creates the MK Foods application icon when it is missing.
+5. Validates Cargo metadata.
+6. Builds the production Tauri application.
+7. Builds the NSIS Windows setup EXE.
+8. Copies the final installer to:
 
-Double-click:
+`dist\MK-Foods-POS-Windows-Setup-x64.exe`
 
-`setup-windows.bat`
+9. Opens the `dist` folder automatically when finished.
 
-The script checks Node.js/npm and Cargo, installs the Tauri CLI, and launches the POS with Tauri.
+## Installer behavior
 
-## Every run
+The NSIS installer is configured for a normal Windows installation flow with a selectable installation location, system-wide installation, Start Menu/Desktop shortcuts, uninstall registration and WebView2 handling when required.
 
-Double-click:
+The application itself is built as a Windows GUI application, so the installed POS does not open a command prompt behind it.
 
-`run-pos.bat`
+## Supported Windows target
 
-If the Tauri CLI is missing, it installs the project's development dependencies automatically before launching the POS.
+The default build is **64-bit Windows (x64)**. Tauri supports Windows 10 and Windows 11; the WebView2 installer handles the runtime when required.
 
-## Command line
+## Manual command
 
-```bat
-npm install --include=dev
-npm start
-```
+If everything is already installed and the icon has been generated, the equivalent command is:
 
-Build the Windows NSIS installer with:
+`npx tauri build --bundles nsis`
 
-```bat
-npm run build
-```
-
-## Troubleshooting
-
-If Windows says `node`, `npm`, or `cargo` is not recognized, install the missing prerequisite and restart the terminal. If the Tauri build fails while compiling native code, confirm that the Microsoft C++ Build Tools workload is installed.
+Do not type `tauri-cli 2.x.x` as a command. `npx tauri --version` prints the installed CLI version; it is output, not a command.
