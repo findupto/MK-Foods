@@ -1,0 +1,26 @@
+[package]
+name = "mk-foods-pos"
+version = "0.1.0"
+description = "Offline-first Enterprise POS for MK Pizza & Ice Bar"
+authors = ["MK Foods"]
+edition = "2021"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["clock"] }
+pbkdf2 = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+subtle = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
