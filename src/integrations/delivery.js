@@ -1,0 +1,5 @@
+const crypto=require('crypto');
+class DeliveryAdapter{constructor(config={}){this.config=config}async ingestOrder(){throw new Error('DELIVERY_ADAPTER_NOT_CONFIGURED')}async acknowledge(){throw new Error('DELIVERY_ADAPTER_NOT_CONFIGURED')}async updateStatus(){throw new Error('DELIVERY_ADAPTER_NOT_CONFIGURED')}verifyWebhook(body,signature){if(!this.config.webhookSecret||!signature)return false;const expected=crypto.createHmac('sha256',this.config.webhookSecret).update(typeof body==='string'?body:JSON.stringify(body)).digest('hex');try{return crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(signature))}catch{return false}}}
+class GenericDeliveryAdapter extends DeliveryAdapter{async ingestOrder(providerOrder){return {provider:this.config.provider,providerOrderId:providerOrder.id,order:providerOrder}}async acknowledge(id){return {ok:true,providerOrderId:id}}async updateStatus(id,status){return {ok:true,providerOrderId:id,status}}}
+const createDeliveryAdapter=config=>new GenericDeliveryAdapter(config);
+module.exports={DeliveryAdapter,GenericDeliveryAdapter,createDeliveryAdapter};
