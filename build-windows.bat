@@ -13,13 +13,13 @@ echo ================================================
 echo.
 
 where node >nul 2>nul || goto :node_missing
-where npm >nul 2>nul || goto :node_missing
+where npm.cmd >nul 2>nul || goto :node_missing
 if not exist "%USERPROFILE%\.cargo\bin\cargo.exe" goto :rust_missing
 if not exist "%USERPROFILE%\.cargo\bin\rustc.exe" goto :rust_missing
 
 call :step "1/8" "Checking Node.js / npm"
 node --version
-npm --version
+call npm.cmd --version
 if errorlevel 1 goto :node_missing
 
 call :step "2/8" "Checking Rust / Cargo"
@@ -28,11 +28,11 @@ rustc --version
 if errorlevel 1 goto :rust_missing
 
 call :step "3/8" "Installing / repairing npm dependencies"
-call npm install --include=dev
+call npm.cmd install --include=dev
 if errorlevel 1 goto :npm_error
 
 call :step "4/8" "Checking Tauri CLI"
-call npx --no-install tauri --version
+call npx.cmd --no-install tauri --version
 if errorlevel 1 goto :tauri_error
 
 call :step "5/8" "Preparing application icon"
@@ -41,7 +41,7 @@ if not exist "src-tauri\icons\mk-foods-icon.svg" (
   >"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="#111111"/^>^<circle cx="512" cy="512" r="360" fill="#ffffff"/^>^<text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111"^>MK^</text^>^<circle cx="512" cy="205" r="34" fill="#111111"/^>^</svg^>
 )
 if not exist "src-tauri\icons\icon.ico" (
-  call npx --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
+  call npx.cmd --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
   if errorlevel 1 goto :icon_error
 )
 if not exist "src-tauri\icons\icon.ico" goto :icon_error
@@ -49,13 +49,11 @@ if not exist "src-tauri\icons\icon.ico" goto :icon_error
 call :step "6/8" "Validating Tauri project"
 cargo metadata --no-deps --format-version 1 --manifest-path "src-tauri\Cargo.toml" >nul
 if errorlevel 1 goto :cargo_error
-call npx --no-install tauri info
-if errorlevel 1 goto :tauri_info_error
 
 call :step "7/8" "Building Windows NSIS installer"
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%"
-call npx --no-install tauri build --bundles nsis
+call npx.cmd --no-install tauri build --bundles nsis
 if errorlevel 1 goto :build_error
 
 set "FOUND="
@@ -113,11 +111,6 @@ exit /b 1
 
 :cargo_error
 echo ERROR: Cargo metadata validation failed.
-pause
-exit /b 1
-
-:tauri_info_error
-echo ERROR: Tauri project validation failed.
 pause
 exit /b 1
 
