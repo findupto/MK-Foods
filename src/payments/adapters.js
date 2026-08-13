@@ -1,0 +1,6 @@
+const crypto=require('crypto');
+class PaymentAdapter{constructor(config={}){this.config=config}async authorize(){throw new Error('PAYMENT_ADAPTER_NOT_CONFIGURED')}async capture(){throw new Error('PAYMENT_ADAPTER_NOT_CONFIGURED')}async void(){throw new Error('PAYMENT_ADAPTER_NOT_CONFIGURED')}async refund(){throw new Error('PAYMENT_ADAPTER_NOT_CONFIGURED')}verifyWebhook(){return false}}
+class ManualReferenceAdapter extends PaymentAdapter{async authorize(intent){if(!intent?.reference)throw new Error('PAYMENT_REFERENCE_REQUIRED');return {status:'authorized',reference:intent.reference}}async capture(intent){return {status:'captured',reference:intent.reference}}async void(intent){return {status:'voided',reference:intent.reference}}async refund(intent){return {status:'refunded',reference:intent.reference}}verifyWebhook(payload,signature,secret){if(!secret||!signature)return false;const expected=crypto.createHmac('sha256',secret).update(JSON.stringify(payload)).digest('hex');return crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(signature))}}
+const adapters={manual:ManualReferenceAdapter};
+function createPaymentAdapter(provider,config){const C=adapters[provider];if(!C)throw new Error(`Unsupported payment provider: ${provider}`);return new C(config)}
+module.exports={PaymentAdapter,ManualReferenceAdapter,createPaymentAdapter};
