@@ -21,7 +21,8 @@ ask_startup:
   ; Windows Startup shortcut (launches the POS when the user signs in).
   MessageBox MB_YESNO|MB_ICONQUESTION "Start MK Foods POS automatically when Windows starts?" IDYES create_startup IDNO ask_quicklaunch
 create_startup:
-  CreateShortCut "$SMSTARTUP\MK Foods POS.lnk" "$INSTDIR\mk-foods-pos.exe" "" "$INSTDIR\mk-foods-pos.exe" 0 SW_SHOWNORMAL "" "MK Foods POS"
+  CreateDirectory "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+  CreateShortCut "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\MK Foods POS.lnk" "$INSTDIR\mk-foods-pos.exe" "" "$INSTDIR\mk-foods-pos.exe" 0 SW_SHOWNORMAL "" "MK Foods POS"
 
 ask_quicklaunch:
   ; Quick Launch shortcut. Windows 10/11 may hide Quick Launch from the taskbar,
@@ -36,10 +37,8 @@ done:
 
 !macro NSIS_HOOK_POSTUNINSTALL
   Delete "$DESKTOP\MK Foods POS.lnk"
-  Delete "$SMSTARTUP\MK Foods POS.lnk"
+  Delete "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\MK Foods POS.lnk"
   Delete "$APPDATA\Microsoft\Internet Explorer\Quick Launch\MK Foods POS.lnk"
   DeleteRegKey HKLM "Software\MK Foods\MK Foods POS"
-  RMDir "$APPDATA\Microsoft\Internet Explorer\Quick Launch"
   RMDir "$APPDATA\Microsoft\Windows\Start Menu\Programs\MK Foods POS"
-  RMDir "HKLM"
 !macroend
