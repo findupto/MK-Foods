@@ -1,0 +1,60 @@
+openapi: 3.0.3
+info:
+  title: MK Foods Enterprise API
+  version: 1.0.0
+servers:
+  - url: /api/v1
+paths:
+  /health:
+    get:
+      responses:
+        '200': {description: Healthy}
+  /sync/push:
+    post:
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SyncBatch'}
+      responses:
+        '200': {description: Accepted}
+  /sync/pull:
+    get:
+      parameters:
+        - {in: query, name: location, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Events}
+  /reconcile:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SyncBatch'}
+      responses:
+        '200': {description: Reconciled}
+components:
+  schemas:
+    SyncEvent:
+      type: object
+      required: [eventId, originDeviceId, locationId, sequence, type, payload, createdAt]
+      properties:
+        eventId: {type: string}
+        originDeviceId: {type: string}
+        locationId: {type: string}
+        sequence: {type: integer}
+        type: {type: string}
+        payload: {type: object}
+        createdAt: {type: string, format: date-time}
+    SyncBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: {$ref: '#/components/schemas/SyncEvent'}
