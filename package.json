@@ -8,6 +8,7 @@
   "scripts": {
     "start": "tauri dev",
     "dev": "tauri dev",
+    "test": "node test/store.test.js && node test/smoke.test.js",
     "build": "tauri build",
     "build:windows": "tauri build --bundles nsis",
     "tauri": "tauri",
