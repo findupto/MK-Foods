@@ -1,0 +1,17 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const root = path.join(__dirname, '..');
+const index = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
+const banking = fs.readFileSync(path.join(root, 'src/renderer/banking.js'), 'utf8');
+const printers = fs.readFileSync(path.join(root, 'src/renderer/printers.js'), 'utf8');
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+
+assert(index.includes('./banking.js'), 'banking.js must be loaded');
+assert(index.includes('data-view="banking"'), 'Banking navigation must exist');
+assert(banking.includes('Raast P2M / 1LINK'), 'Raast/1LINK provider option must exist');
+assert(banking.includes('Bank Transfer / Raast'), 'Bank tender must exist');
+assert(printers.includes('navigator.bluetooth'), 'Bluetooth printer discovery must exist');
+assert(printers.includes('navigator.serial'), 'Serial/COM printer support must exist');
+assert(typeof pkg.scripts.test === 'string', 'npm test script must exist');
+console.log('MK Foods renderer smoke tests passed');
