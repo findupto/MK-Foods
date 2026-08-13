@@ -10,7 +10,7 @@ license = "MIT"
 tauri-build = "2"
 
 [dependencies]
-tauri = { version = "2", features = ["window-all"] }
+tauri = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-log = { version = "2", features = ["colored"] }
 serde = { version = "1", features = ["derive"] }
