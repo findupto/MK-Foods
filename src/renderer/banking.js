@@ -1,0 +1,124 @@
+(() => {
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const api = async (fn, ...args) => {
+    try { return await fn(...args); }
+    catch (e) { return { ok: false, reason: String(e?.message || e) }; }
+  };
+  const providers = [
+    { id: 'raast-p2m', name: 'Raast P2M / 1LINK', mode: 'QR / Alias / IBAN / RTP' },
+    { id: '1link-ibft', name: '1LINK IBFT', mode: 'Bank transfer' },
+    { id: 'bank-api', name: 'Direct Bank API', mode: 'Provider-specific' },
+    { id: 'gateway', name: 'Payment Gateway', mode: 'Gateway-specific' }
+  ];
+
+  function settings() { return db.settings || {}; }
+  function profile() {
+    const s = settings();
+    return {
+      provider: s.paymentProvider || '',
+      merchantId: s.paymentMerchantId || '',
+      bankName: s.paymentBankName || '',
+      accountTitle: s.paymentAccountTitle || '',
+      iban: s.paymentIban || '',
+      raastAlias: s.paymentRaastAlias || '',
+      apiBaseUrl: s.paymentApiBaseUrl || '',
+      webhookUrl: s.paymentWebhookUrl || '',
+      environment: s.paymentEnvironment || 'disabled',
+      currency: s.currency || 'Rs.'
+    };
+  }
+  function status(p) {
+    if (!p.provider) return ['Not configured', 'warning'];
+    if (p.provider === 'raast-p2m' && (p.raastAlias || p.iban || p.merchantId)) return ['Merchant profile configured', 'ok'];
+    if (p.apiBaseUrl && p.merchantId) return ['Adapter configured — credentials required', 'ok'];
+    return ['Configuration incomplete', 'warning'];
+  }
+  function form(p) {
+    return `<div class="formgrid">
+      <label>Payment provider<select id="bankProvider" class="field">${providers.map(x => `<option value="${x.id}" ${x.id === p.provider ? 'selected' : ''}>${esc(x.name)} — ${esc(x.mode)}</option>`).join('')}</select></label>
+      <label>Environment<select id="bankEnvironment" class="field"><option value="disabled" ${p.environment === 'disabled' ? 'selected' : ''}>Disabled</option><option value="sandbox" ${p.environment === 'sandbox' ? 'selected' : ''}>Sandbox / Test</option><option value="production" ${p.environment === 'production' ? 'selected' : ''}>Production</option></select></label>
+      <label>Merchant ID<input id="bankMerchantId" class="field" value="${esc(p.merchantId)}" autocomplete="off"></label>
+      <label>Bank / Provider<input id="bankName" class="field" value="${esc(p.bankName)}"></label>
+      <label>Account title<input id="bankAccountTitle" class="field" value="${esc(p.accountTitle)}"></label>
+      <label>IBAN<input id="bankIban" class="field" value="${esc(p.iban)}" placeholder="PK..." autocomplete="off"></label>
+      <label>Raast alias<input id="bankRaastAlias" class="field" value="${esc(p.raastAlias)}" autocomplete="off"></label>
+      <label>Provider API base URL<input id="bankApiBaseUrl" class="field" value="${esc(p.apiBaseUrl)}" placeholder="https://..." autocomplete="off"></label>
+      <label>Webhook URL<input id="bankWebhookUrl" class="field" value="${esc(p.webhookUrl)}" placeholder="https://..." autocomplete="off"></label>
+    </div>`;
+  }
+
+  window.saveBankingProfile = async () => {
+    if (typeof canManage === 'function' && !canManage()) return alert('Admin/Owner only');
+    const next = {
+      paymentProvider: document.getElementById('bankProvider')?.value || '',
+      paymentEnvironment: document.getElementById('bankEnvironment')?.value || 'disabled',
+      paymentMerchantId: document.getElementById('bankMerchantId')?.value.trim() || '',
+      paymentBankName: document.getElementById('bankName')?.value.trim() || '',
+      paymentAccountTitle: document.getElementById('bankAccountTitle')?.value.trim() || '',
+      paymentIban: document.getElementById('bankIban')?.value.trim().toUpperCase() || '',
+      paymentRaastAlias: document.getElementById('bankRaastAlias')?.value.trim() || '',
+      paymentApiBaseUrl: document.getElementById('bankApiBaseUrl')?.value.trim() || '',
+      paymentWebhookUrl: document.getElementById('bankWebhookUrl')?.value.trim() || ''
+    };
+    if (next.paymentEnvironment === 'production' && !next.paymentMerchantId) return alert('Production online payments require a real merchant ID from your bank/payment provider.');
+    const r = await api(window.mkFoods.updateSettings, next);
+    if (r?.ok === false) return alert(r.reason || 'Could not save banking settings.');
+    await load();
+    alert('Banking profile saved.');
+  };
+
+  window.clearBankingProfile = async () => {
+    if (typeof canManage === 'function' && !canManage()) return alert('Admin/Owner only');
+    if (!confirm('Disable online banking and clear the saved merchant profile?')) return;
+    const r = await api(window.mkFoods.updateSettings, {
+      paymentProvider: '', paymentEnvironment: 'disabled', paymentMerchantId: '', paymentBankName: '',
+      paymentAccountTitle: '', paymentIban: '', paymentRaastAlias: '', paymentApiBaseUrl: '', paymentWebhookUrl: ''
+    });
+    if (r?.ok === false) return alert(r.reason || 'Could not clear banking settings.');
+    await load();
+  };
+
+  function injectTender() {
+    const select = document.getElementById('payment');
+    if (!select || select.dataset.bankingReady) return;
+    const p = profile();
+    const option = document.createElement('option');
+    option.value = 'Bank Transfer / Raast';
+    option.textContent = p.provider ? 'Bank Transfer / Raast' : 'Bank Transfer (configure first)';
+    select.appendChild(option);
+    select.dataset.bankingReady = '1';
+  }
+
+  views.banking = v => {
+    const p = profile();
+    const [state, tone] = status(p);
+    v.innerHTML = shell('Banking & Digital Payments', 'Configure a real merchant account without storing card PAN/CVV in the POS', `
+      <div class="grid cols">
+        <div class="panel">
+          <h2>Merchant connection</h2>
+          <div class="notice"><b>${esc(state)}</b><br><span class="muted">Provider: ${esc(p.provider || 'None')} · Environment: ${esc(p.environment)}</span></div>
+          ${form(p)}
+          <div class="toolbar" style="margin-top:12px"><button class="btn" onclick="saveBankingProfile()">Save Profile</button><button class="btn secondary" onclick="clearBankingProfile()">Disable / Clear</button></div>
+        </div>
+        <div class="panel">
+          <h2>How bank attachment works</h2>
+          <ol>
+            <li>Open a merchant account with your bank or an SBP-regulated payment provider.</li>
+            <li>Request Raast P2M and/or the provider's merchant API access.</li>
+            <li>Enter the merchant ID, IBAN/Raast alias and provider endpoint above.</li>
+            <li>Keep API secrets in the provider/OS secure secret store; never put them in renderer JavaScript or Git.</li>
+            <li>Use Sandbox/Test first, then complete provider certification before Production.</li>
+          </ol>
+          <div class="notice">The POS will never pretend a bank payment is approved. A real adapter/webhook must return a verified provider transaction ID before a digital payment can be treated as settled.</div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px"><h2>Supported payment design</h2><div class="grid cards"><div class="card"><small>Raast P2M</small><strong>QR / Alias / IBAN / RTP</strong></div><div class="card"><small>1LINK</small><strong>IBFT / merchant APIs</strong></div><div class="card"><small>Cards</small><strong>Terminal/provider controlled</strong></div><div class="card"><small>Offline</small><strong>Cash only</strong></div></div><p class="muted">Online tender selection is recorded against the order. Approval, settlement, reversal and refund require a certified provider adapter and must not be simulated.</p></div>`);
+    injectTender();
+  };
+
+  const originalRender = window.render;
+  if (typeof originalRender === 'function') {
+    const observer = new MutationObserver(() => injectTender());
+    observer.observe(document.getElementById('view'), { childList: true, subtree: true });
+  }
+})();
