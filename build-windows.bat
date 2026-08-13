@@ -8,7 +8,6 @@ set "OUT=%CD%\dist"
 set "BUNDLE=%CD%\src-tauri\target\release\bundle\nsis"
 
 call :banner
-
 where node >nul 2>nul || goto :node_missing
 where npm >nul 2>nul || goto :node_missing
 if not exist "%USERPROFILE%\.cargo\bin\cargo.exe" goto :rust_missing
@@ -33,7 +32,7 @@ if errorlevel 1 goto :tauri_error
 call :step "5/7" "Preparing Windows application icon"
 if not exist "src-tauri\icons" mkdir "src-tauri\icons"
 if not exist "src-tauri\icons\mk-foods-icon.svg" (
-  >"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="#111111"/^>^<circle cx="512" cy="512" r="360" fill="#ffffff"/^>^<text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111"^>MK^</text^>^<circle cx="512" cy="205" r="34" fill="#111111"/^>^</svg^>
+  >"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="#111111"/^>^<circle cx="512" cy="512" r="360" fill="#ffffff"/^>^<text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111"^>MK^</text^>^<circle cx="512" cy="205" r="34" fill="#111111"/^>^</svg^
 )
 if not exist "src-tauri\icons\icon.ico" (
   call npx --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
@@ -41,11 +40,11 @@ if not exist "src-tauri\icons\icon.ico" (
 )
 if not exist "src-tauri\icons\icon.ico" goto :icon_error
 
-call :step "6/7" "Validating Cargo metadata"
+call :step "6/7" "Validating Tauri Cargo metadata"
 cargo metadata --no-deps --format-version 1 --manifest-path "src-tauri\Cargo.toml" >nul
 if errorlevel 1 goto :cargo_error
 
-call :step "7/7" "Building MK Foods POS Windows installer"
+call :step "7/7" "Building MK Foods POS standalone Windows installer"
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%"
 call npx --no-install tauri build --bundles nsis
@@ -60,14 +59,14 @@ if errorlevel 1 goto :copy_error
 
 call :banner
 echo BUILD SUCCESSFUL
- echo.
+echo.
 echo Installer:
 echo %OUT%\MK-Foods-POS-Windows-Setup-x64.exe
 echo.
-echo The installer supports the normal Windows installation flow,
-echo including installation directory, administrator/system installation,
-echo Start Menu/Desktop shortcuts and Windows uninstall registration.
-echo WebView2 is handled by the Tauri installer when required.
+echo The generated EXE is a normal GUI Windows installer.
+echo End users do NOT need Node.js, npm, Rust or Cargo.
+echo The Tauri app uses a Windows GUI subsystem, so the installed POS does not open a CMD window.
+echo WebView2 bootstrapper is embedded in the installer.
 echo.
 start "" explorer.exe "%OUT%"
 exit /b 0
@@ -95,7 +94,7 @@ exit /b 1
 :rust_missing
 echo ERROR: Rust/Cargo is missing.
 echo Expected: %USERPROFILE%\.cargo\bin\cargo.exe
-echo Run Rustup installation, then reopen CMD and run this file again.
+echo Install Rustup, then reopen Windows Terminal and run this file again.
 pause
 exit /b 1
 
@@ -117,7 +116,8 @@ pause
 exit /b 1
 
 :cargo_error
-echo ERROR: Cargo metadata validation failed.
+echo ERROR: Tauri Cargo metadata validation failed.
+echo If you see an error mentioning the repository root Cargo.toml, update to the latest repository version.
 pause
 exit /b 1
 
