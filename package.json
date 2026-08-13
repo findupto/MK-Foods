@@ -8,7 +8,10 @@
   "scripts": {
     "start": "tauri dev",
     "dev": "tauri dev",
-    "test": "node test/store.test.js && node test/smoke.test.js && node test/production.test.js",
+    "test": "node test/store.test.js && node test/smoke.test.js && node test/production.test.js && node test/enterprise.test.js && node test/api.test.js",
+    "test:enterprise": "node test/enterprise.test.js",
+    "test:api": "node test/api.test.js",
+    "cloud": "node cloud/server.js",
     "build": "tauri build",
     "build:windows": "tauri build --bundles nsis",
     "tauri": "tauri",
