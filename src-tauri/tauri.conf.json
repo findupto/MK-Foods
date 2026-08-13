@@ -40,7 +40,8 @@
         "installMode": "perMachine",
         "startMenuFolder": "MK Foods POS",
         "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico"
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHooks": "./windows/hooks.nsh"
       }
     }
   },
