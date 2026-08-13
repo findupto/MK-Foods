@@ -18,9 +18,6 @@
     inventory: Array.isArray(db?.products)
   });
 
-  // Replace the original checkout with a stricter calculation and payment guard.
-  // Online payments are never marked settled unless a trusted provider adapter has
-  // supplied a verified transaction reference. Cash remains fully offline-capable.
   window.checkout = async () => {
     if (!Array.isArray(cart) || !cart.length) return alert('Add at least one item.');
     const subtotal = cart.reduce((s, x) => s + num(x.price) * Math.max(0, num(x.qty)), 0);
@@ -42,6 +39,14 @@
       return alert('Card processing requires a configured acquiring/payment provider.');
     }
     if (type === 'Delivery' && !address.trim()) return alert('Delivery address is required.');
+
+    for (const item of cart) {
+      const product = db.products?.find(p => p.id === item.id);
+      if (!product) return alert(`Product no longer exists: ${item.name}`);
+      if (num(item.qty) <= 0 || num(item.qty) > num(product.stock)) {
+        return alert(`Not enough stock for ${item.name}. Available: ${num(product.stock)}`);
+      }
+    }
 
     const order = {
       id: 'ORD-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
@@ -70,7 +75,18 @@
     alert(`Order ${order.id} recorded. Payment status: ${order.paymentStatus}.`);
   };
 
-  // Add a compact readiness panel to the dashboard without changing the existing dashboard code.
+  const originalPos = views.pos;
+  views.pos = v => {
+    const cats = [...new Set((db.products || []).filter(p => p.available).map(p => p.category))];
+    const subtotal = cart.reduce((s, x) => s + num(x.price) * num(x.qty), 0);
+    const discount = Math.min(Math.max(0, num(document.getElementById('discount')?.value)), subtotal);
+    const tax = Math.max(0, subtotal - discount) * Math.max(0, num(db.settings?.tax)) / 100;
+    const deliveryFee = Math.max(0, num(document.getElementById('deliveryFee')?.value));
+    const total = subtotal - discount + tax + deliveryFee;
+    v.innerHTML = shell('POS / Orders', 'Fast billing · cash/card/COD · table or delivery', `<div class="poslayout"><div class="panel"><div class="toolbar"><input id="productSearch" class="field" placeholder="Search menu..." oninput="renderPosProducts()"><select id="posCat" class="field" onchange="renderPosProducts()"><option value="">All categories</option>${cats.map(c => `<option>${esc(c)}</option>`).join('')}</select></div><div id="posProducts" class="productgrid"></div></div><div class="panel cartpanel"><h2>Current Order</h2><div id="cartLines">${cart.map((x,i) => `<div class="orderline"><span>${esc(x.name)} × ${x.qty}</span><span>${money(x.price*x.qty)} <button class="mini danger" onclick="removeItem(${i})">×</button></span></div>`).join('') || '<p class="muted">No items yet</p>'}</div><div class="formgrid"><label>Type<select id="orderType" class="field"><option>Dine-in</option><option>Takeaway</option><option>Delivery</option></select></label><label>Payment<select id="payment" class="field"><option>Cash</option><option>Card</option><option>Online</option><option>COD</option><option>Bank Transfer / Raast</option></select></label><label>Discount<input id="discount" class="field" type="number" min="0" value="0" oninput="render()"></label><label>Delivery Fee<input id="deliveryFee" class="field" type="number" min="0" value="0" oninput="render()"></label><label>Customer<input id="customerName" class="field" placeholder="Optional"></label><label class="wide">Address<input id="deliveryAddress" class="field" placeholder="Delivery address"></label></div><div class="grid cards" style="margin-top:12px"><div class="card"><small>Subtotal</small><strong>${money(subtotal)}</strong></div><div class="card"><small>Discount</small><strong>${money(discount)}</strong></div><div class="card"><small>Tax</small><strong>${money(tax)}</strong></div><div class="card"><small>Total</small><strong>${money(total)}</strong></div></div><div class="notice" style="margin-top:12px">Cash/COD can settle offline. Card, Online and Raast payments require a real provider/bank configuration and are recorded as pending verification until a trusted integration is added.</div><button class="btn widebtn" ${cart.length ? '' : 'disabled'} onclick="checkout()">Complete Sale</button></div></div>`);
+    renderPosProducts();
+  };
+
   const originalDashboard = views.dashboard;
   views.dashboard = v => {
     originalDashboard(v);
@@ -78,12 +94,7 @@
     const node = document.createElement('div');
     node.className = 'panel';
     node.style.marginTop = '14px';
-    node.innerHTML = `<h2>Production Readiness</h2><div class="grid cards">
-      <div class="card"><small>Offline Cash</small><strong>${r.offlineCash ? 'READY' : 'CHECK'}</strong></div>
-      <div class="card"><small>Banking</small><strong>${r.banking ? 'CONFIGURED' : 'SETUP NEEDED'}</strong></div>
-      <div class="card"><small>Printer</small><strong>${r.printer ? 'SELECTED' : 'SETUP NEEDED'}</strong></div>
-      <div class="card"><small>Audit / Inventory</small><strong>${r.audit && r.inventory ? 'READY' : 'CHECK'}</strong></div>
-    </div>`;
+    node.innerHTML = `<h2>Production Readiness</h2><div class="grid cards"><div class="card"><small>Offline Cash</small><strong>${r.offlineCash ? 'READY' : 'CHECK'}</strong></div><div class="card"><small>Banking</small><strong>${r.banking ? 'CONFIGURED' : 'SETUP NEEDED'}</strong></div><div class="card"><small>Printer</small><strong>${r.printer ? 'SELECTED' : 'SETUP NEEDED'}</strong></div><div class="card"><small>Audit / Inventory</small><strong>${r.audit && r.inventory ? 'READY' : 'CHECK'}</strong></div></div>`;
     v.appendChild(node);
   };
 })();
