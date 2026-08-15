@@ -1,4 +1,4 @@
-name: Build MK Foods POS Windows Installer
+name: Build MK Foods POS Windows Installers
 
 on:
   push:
@@ -6,8 +6,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
+  tests:
+    name: Renderer and API tests
     runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install --include=dev
+
+      - name: Run tests
+        run: npm test
+
+  build-windows:
+    name: Build ${{ matrix.name }} NSIS installer
+    needs: tests
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            target: x86_64-pc-windows-msvc
+          - name: x86
+            target: i686-pc-windows-msvc
+          - name: ARM64
+            target: aarch64-pc-windows-msvc
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -20,20 +50,17 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
       - name: Install dependencies
         run: npm install --include=dev
 
-      - name: Run renderer and store tests
-        run: npm test
-
       - name: Build NSIS installer
-        run: npx tauri build --bundles nsis
+        run: npx tauri build --bundles nsis --target ${{ matrix.target }}
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: MK-Foods-POS-Windows-Installer
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          name: MK-Foods-POS-Windows-Installer-${{ matrix.name }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
