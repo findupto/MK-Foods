@@ -3,12 +3,10 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 title MK Foods POS - Build Windows Installers
 
-rem Use the user's standard Rust locations.
 set "CARGO_HOME=%USERPROFILE%\.cargo"
 set "RUSTUP_HOME=%USERPROFILE%\.rustup"
 set "PATH=%CARGO_HOME%\bin;%PATH%"
 set "OUT=%CD%\dist"
-
 set "TARGET_X64=x86_64-pc-windows-msvc"
 set "TARGET_X86=i686-pc-windows-msvc"
 set "TARGET_ARM64=aarch64-pc-windows-msvc"
@@ -30,32 +28,60 @@ if not exist "%CARGO_HOME%\bin\cargo.exe" goto :rust_missing
 if not exist "%CARGO_HOME%\bin\rustc.exe" goto :rust_missing
 if not exist "%RUSTUP_HOME%" goto :rust_missing
 
-call :step "1/9" "Checking Node.js / npm"
+echo [1/9] Checking Node.js / npm
+echo ---------------------------------------------------------------
 node --version
 call npm.cmd --version
 if errorlevel 1 goto :node_missing
 
-call :step "2/9" "Checking Rust / Cargo"
+echo.
+echo [2/9] Checking Rust / Cargo
+echo ---------------------------------------------------------------
 cargo --version
 rustc --version
 rustup --version
 if errorlevel 1 goto :rust_missing
 
-call :step "3/9" "Detecting Visual Studio C++ MSVC tools"
-call :find_visual_studio
+echo.
+echo [3/9] Detecting Visual Studio C++ MSVC tools
+echo ---------------------------------------------------------------
+if not exist "%VSWHERE%" (
+  echo ERROR: Visual Studio Installer / vswhere.exe was not found.
+  goto :msvc_missing
+)
+for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do if not defined VSINSTALL set "VSINSTALL=%%I"
+if not defined VSINSTALL (
+  echo ERROR: Visual Studio C++ MSVC build tools were not found.
+  goto :msvc_missing
+)
+if not exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" (
+  echo ERROR: Visual Studio developer command environment was not found.
+  goto :msvc_missing
+)
+echo Visual Studio: %VSINSTALL%
+call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
 if errorlevel 1 goto :msvc_missing
-call :prepare_msvc "x64"
+where cl.exe >nul 2>nul
 if errorlevel 1 goto :msvc_missing
+cl.exe 2>&1 | findstr /c:"Microsoft" >nul
+if errorlevel 1 goto :msvc_missing
+echo MSVC compiler ready.
 
-call :step "4/9" "Installing / repairing npm dependencies"
+echo.
+echo [4/9] Installing / repairing npm dependencies
+echo ---------------------------------------------------------------
 call npm.cmd install --include=dev
 if errorlevel 1 goto :npm_error
 
-call :step "5/9" "Running project tests"
+echo.
+echo [5/9] Running project tests
+echo ---------------------------------------------------------------
 call npm.cmd test
 if errorlevel 1 goto :test_error
 
-call :step "6/9" "Checking Tauri CLI and Windows targets"
+echo.
+echo [6/9] Checking Tauri CLI and Windows targets
+echo ---------------------------------------------------------------
 call npx.cmd --no-install tauri --version
 if errorlevel 1 goto :tauri_error
 call rustup.exe target add %TARGET_X64%
@@ -65,7 +91,9 @@ if errorlevel 1 goto :target_error
 call rustup.exe target add %TARGET_ARM64%
 if errorlevel 1 goto :target_error
 
-call :step "7/9" "Preparing application icon"
+echo.
+echo [7/9] Preparing application icon
+echo ---------------------------------------------------------------
 if not exist "src-tauri\icons" mkdir "src-tauri\icons"
 if not exist "src-tauri\icons\mk-foods-icon.svg" (
   >"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="#111111"/^>^<circle cx="512" cy="512" r="360" fill="#ffffff"/^>^<text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111"^>MK^</text^>^<circle cx="512" cy="205" r="34" fill="#111111"/^>^</svg^>
@@ -76,11 +104,15 @@ if not exist "src-tauri\icons\icon.ico" (
 )
 if not exist "src-tauri\icons\icon.ico" goto :icon_error
 
-call :step "8/9" "Validating Tauri project"
+echo.
+echo [8/9] Validating Tauri project
+echo ---------------------------------------------------------------
 cargo metadata --no-deps --format-version 1 --manifest-path "src-tauri\Cargo.toml" >nul
 if errorlevel 1 goto :cargo_error
 
-call :step "9/9" "Building NSIS installers for x64, x86 and ARM64"
+echo.
+echo [9/9] Building NSIS installers for x64, x86 and ARM64
+echo ---------------------------------------------------------------
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%"
 
@@ -110,45 +142,6 @@ echo.
 start "" explorer.exe "%OUT%"
 exit /b 0
 
-:find_visual_studio
-if not exist "%VSWHERE%" (
-  echo ERROR: Visual Studio Installer / vswhere.exe was not found.
-  exit /b 1
-)
-for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do if not defined VSINSTALL set "VSINSTALL=%%I"
-if not defined VSINSTALL (
-  echo ERROR: Visual Studio C++ MSVC build tools are not installed.
-  exit /b 1
-)
-if not exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" (
-  echo ERROR: Visual Studio developer command environment was not found.
-  exit /b 1
-)
-echo Visual Studio: %VSINSTALL%
-exit /b 0
-
-:prepare_msvc
-set "MSVC_ARCH=%~1"
-set "VSCMD_ARCH="
-if /i "%MSVC_ARCH%"=="x64" set "VSCMD_ARCH=x64"
-if /i "%MSVC_ARCH%"=="x86" set "VSCMD_ARCH=x86"
-if /i "%MSVC_ARCH%"=="ARM64" set "VSCMD_ARCH=arm64"
-if not defined VSCMD_ARCH exit /b 1
-
-call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=%VSCMD_ARCH% -host_arch=x64 >nul
-if errorlevel 1 (
-  echo ERROR: Visual Studio could not initialize the %MSVC_ARCH% compiler environment.
-  exit /b 1
-)
-where cl.exe >nul 2>nul
-if errorlevel 1 (
-  echo ERROR: cl.exe is unavailable for the %MSVC_ARCH% build.
-  echo Install the Visual Studio C++ workload and the %MSVC_ARCH% MSVC/Windows SDK components.
-  exit /b 1
-)
-echo MSVC compiler ready for %MSVC_ARCH%.
-exit /b 0
-
 :build_target
 set "TARGET=%~1"
 set "ARCH=%~2"
@@ -158,8 +151,20 @@ echo.
 echo ---------------------------------------------------------------
 echo Building %ARCH% - %TARGET%
 echo ---------------------------------------------------------------
-call :prepare_msvc "%ARCH%"
-if errorlevel 1 exit /b 1
+set "VSCMD_ARCH=x64"
+if /i "%ARCH%"=="x86" set "VSCMD_ARCH=x86"
+if /i "%ARCH%"=="ARM64" set "VSCMD_ARCH=arm64"
+call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=%VSCMD_ARCH% -host_arch=x64 >nul
+if errorlevel 1 (
+  echo ERROR: Visual Studio could not initialize the %ARCH% compiler environment.
+  exit /b 1
+)
+where cl.exe >nul 2>nul
+if errorlevel 1 (
+  echo ERROR: cl.exe is unavailable for %ARCH%.
+  echo Install the matching Visual Studio C++ workload and Windows SDK.
+  exit /b 1
+)
 if exist "%TARGET_BUNDLE%" rmdir /s /q "%TARGET_BUNDLE%"
 call npx.cmd --no-install tauri build --bundles nsis --target "%TARGET%"
 if errorlevel 1 exit /b 1
@@ -172,12 +177,6 @@ if not defined FOUND (
 copy /y "%FOUND%" "%OUT%\MK-Foods-POS-Windows-Setup-%ARCH%.exe" >nul
 if errorlevel 1 exit /b 1
 echo %ARCH% installer created successfully.
-exit /b 0
-
-:step
-echo.
-echo [%~1] %~2
-echo ---------------------------------------------------------------
 exit /b 0
 
 :node_missing
@@ -197,9 +196,9 @@ echo.
 echo ERROR: Visual Studio C++ MSVC build tools are required to build bundled SQLite and the Windows installers.
 echo Install Visual Studio Build Tools with:
 echo   Desktop development with C++
-echo   MSVC C++ build tools
+echo   MSVC C++ build tools for x64/x86
+echo   MSVC C++ ARM64 build tools
 echo   Windows 10/11 SDK
-echo   C++ ATL support (recommended)
 echo Then reopen this terminal and run build-windows.bat again.
 pause
 exit /b 1
@@ -221,9 +220,6 @@ exit /b 1
 
 :target_error
 echo ERROR: A required Rust Windows target could not be installed.
-echo x64: %TARGET_X64%
-echo x86: %TARGET_X86%
-echo ARM64: %TARGET_ARM64%
 pause
 exit /b 1
 
@@ -239,6 +235,6 @@ exit /b 1
 
 :build_error
 echo ERROR: A Windows installer build failed.
-echo Check the compiler error above. The build script automatically initializes the matching MSVC environment for each target.
+echo Check the compiler error above.
 pause
 exit /b 1
