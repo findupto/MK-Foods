@@ -2,8 +2,9 @@
 
 ; MK Foods POS custom Windows installer integration.
 ; Tauri's NSIS installer already creates the Start Menu shortcut and
-; standard uninstall registry information. This hook adds an app registry
-; entry and lets the user opt into extra shortcuts after installation.
+; standard uninstall registry information. This hook adds application
+; registry information and optionally creates Desktop, Startup and
+; Quick Launch shortcuts.
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Application registry information (per-machine installer).
@@ -12,27 +13,26 @@
   WriteRegStr HKLM "Software\MK Foods\MK Foods POS" "Publisher" "MK Foods"
   WriteRegStr HKLM "Software\MK Foods\MK Foods POS" "DisplayName" "MK Foods POS"
 
-  ; Desktop shortcut
-  MessageBox MB_YESNO|MB_ICONQUESTION "Create a desktop shortcut for MK Foods POS?" IDYES create_desktop IDNO ask_startup
-create_desktop:
+  ; Ask for a desktop shortcut.
+  ; /SD IDNO makes silent installs choose No automatically.
+  MessageBox MB_YESNO|MB_ICONQUESTION "Create a desktop shortcut for MK Foods POS?" /SD IDNO IDNO mk_ask_startup
   CreateShortCut "$DESKTOP\MK Foods POS.lnk" "$INSTDIR\mk-foods-pos.exe" "" "$INSTDIR\mk-foods-pos.exe" 0 SW_SHOWNORMAL "" "MK Foods POS"
 
-ask_startup:
-  ; Windows Startup shortcut (launches the POS when the user signs in).
-  MessageBox MB_YESNO|MB_ICONQUESTION "Start MK Foods POS automatically when Windows starts?" IDYES create_startup IDNO ask_quicklaunch
-create_startup:
+mk_ask_startup:
+  ; Ask whether MK Foods POS should start with Windows.
+  MessageBox MB_YESNO|MB_ICONQUESTION "Start MK Foods POS automatically when Windows starts?" /SD IDNO IDNO mk_ask_quicklaunch
   CreateDirectory "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
   CreateShortCut "$APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\MK Foods POS.lnk" "$INSTDIR\mk-foods-pos.exe" "" "$INSTDIR\mk-foods-pos.exe" 0 SW_SHOWNORMAL "" "MK Foods POS"
 
-ask_quicklaunch:
-  ; Quick Launch shortcut. Windows 10/11 may hide Quick Launch from the taskbar,
-  ; but the shortcut remains available in the user's Quick Launch folder.
-  MessageBox MB_YESNO|MB_ICONQUESTION "Create a Quick Launch shortcut for MK Foods POS?" IDYES create_quicklaunch done
-create_quicklaunch:
+mk_ask_quicklaunch:
+  ; Ask whether to create a Quick Launch shortcut.
+  ; Windows 10/11 may hide Quick Launch from the taskbar, but the shortcut
+  ; remains available in the user's Quick Launch folder.
+  MessageBox MB_YESNO|MB_ICONQUESTION "Create a Quick Launch shortcut for MK Foods POS?" /SD IDNO IDNO mk_install_done
   CreateDirectory "$APPDATA\Microsoft\Internet Explorer\Quick Launch"
   CreateShortCut "$APPDATA\Microsoft\Internet Explorer\Quick Launch\MK Foods POS.lnk" "$INSTDIR\mk-foods-pos.exe" "" "$INSTDIR\mk-foods-pos.exe" 0 SW_SHOWNORMAL "" "MK Foods POS"
 
-done:
+mk_install_done:
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
