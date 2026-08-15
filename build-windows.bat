@@ -51,10 +51,17 @@ echo [3/9] Detecting Visual Studio C++ MSVC tools
 echo ---------------------------------------------------------------
 for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do if not defined VSINSTALL set "VSINSTALL=%%I"
 if not defined VSINSTALL goto :msvc_not_found
-if not exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" goto :vsdevcmd_missing
 echo Visual Studio: %VSINSTALL%
-call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-if errorlevel 1 goto :msvc_init_failed
+
+rem Do not put the VSINSTALL path inside an IF/parenthesized block. Visual Studio
+rem commonly lives under "Program Files (x86)", whose parentheses can break cmd.exe
+rem parsing. Push into the Tools directory and invoke VsDevCmd by filename instead.
+pushd "%VSINSTALL%\Common7\Tools" >nul 2>nul
+if errorlevel 1 goto :vsdevcmd_missing
+call VsDevCmd.bat -arch=x64 -host_arch=x64 >nul
+set "VSDEV_ERROR=%errorlevel%"
+popd
+if not "%VSDEV_ERROR%"=="0" goto :msvc_init_failed
 where cl.exe >nul 2>nul
 if errorlevel 1 goto :cl_missing
 echo MSVC compiler ready.
@@ -151,8 +158,12 @@ echo ---------------------------------------------------------------
 set "VSCMD_ARCH=x64"
 if /i "%ARCH%"=="x86" set "VSCMD_ARCH=x86"
 if /i "%ARCH%"=="ARM64" set "VSCMD_ARCH=arm64"
-call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=%VSCMD_ARCH% -host_arch=x64 >nul
+pushd "%VSINSTALL%\Common7\Tools" >nul 2>nul
 if errorlevel 1 goto :target_msvc_init_failed
+call VsDevCmd.bat -arch=%VSCMD_ARCH% -host_arch=x64 >nul
+set "TARGET_VSDEV_ERROR=%errorlevel%"
+popd
+if not "%TARGET_VSDEV_ERROR%"=="0" goto :target_msvc_init_failed
 where cl.exe >nul 2>nul
 if errorlevel 1 goto :target_cl_missing
 if exist "%TARGET_BUNDLE%" rmdir /s /q "%TARGET_BUNDLE%"
