@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 title MK Foods POS - Build Windows Installers
 
@@ -51,9 +51,9 @@ echo [3/9] Detecting Visual Studio C++ MSVC tools
 echo ---------------------------------------------------------------
 for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do if not defined VSINSTALL set "VSINSTALL=%%I"
 if not defined VSINSTALL goto :msvc_not_found
-if not exist "!VSINSTALL!\Common7\Tools\VsDevCmd.bat" goto :vsdevcmd_missing
-echo Visual Studio: !VSINSTALL!
-call "!VSINSTALL!\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+if not exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" goto :vsdevcmd_missing
+echo Visual Studio: %VSINSTALL%
+call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
 if errorlevel 1 goto :msvc_init_failed
 where cl.exe >nul 2>nul
 if errorlevel 1 goto :cl_missing
@@ -151,30 +151,33 @@ echo ---------------------------------------------------------------
 set "VSCMD_ARCH=x64"
 if /i "%ARCH%"=="x86" set "VSCMD_ARCH=x86"
 if /i "%ARCH%"=="ARM64" set "VSCMD_ARCH=arm64"
-call "!VSINSTALL!\Common7\Tools\VsDevCmd.bat" -arch=!VSCMD_ARCH! -host_arch=x64 >nul
-if errorlevel 1 (
-  echo ERROR: Visual Studio could not initialize the %ARCH% compiler environment.
-  exit /b 1
-)
+call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=%VSCMD_ARCH% -host_arch=x64 >nul
+if errorlevel 1 goto :target_msvc_init_failed
 where cl.exe >nul 2>nul
-if errorlevel 1 (
-  echo ERROR: cl.exe is unavailable for %ARCH%.
-  echo Install the matching Visual Studio C++ workload and Windows SDK.
-  exit /b 1
-)
+if errorlevel 1 goto :target_cl_missing
 if exist "%TARGET_BUNDLE%" rmdir /s /q "%TARGET_BUNDLE%"
 call npx.cmd --no-install tauri build --bundles nsis --target "%TARGET%"
 if errorlevel 1 exit /b 1
 for /r "%TARGET_BUNDLE%" %%F in (*-setup.exe) do if not defined FOUND set "FOUND=%%~fF"
-if not defined FOUND (
-  echo ERROR: No NSIS installer was produced for %ARCH%.
-  echo Expected: %TARGET_BUNDLE%
-  exit /b 1
-)
+if not defined FOUND goto :installer_missing
 copy /y "%FOUND%" "%OUT%\MK-Foods-POS-Windows-Setup-%ARCH%.exe" >nul
 if errorlevel 1 exit /b 1
 echo %ARCH% installer created successfully.
 exit /b 0
+
+:installer_missing
+echo ERROR: No NSIS installer was produced for %ARCH%.
+echo Expected: %TARGET_BUNDLE%
+exit /b 1
+
+:target_msvc_init_failed
+echo ERROR: Visual Studio could not initialize the %ARCH% compiler environment.
+exit /b 1
+
+:target_cl_missing
+echo ERROR: cl.exe is unavailable for %ARCH%.
+echo Install the matching Visual Studio C++ workload and Windows SDK.
+exit /b 1
 
 :node_missing
 echo ERROR: Node.js/npm is missing or failed.
@@ -203,7 +206,7 @@ exit /b 1
 
 :vsdevcmd_missing
 echo ERROR: VsDevCmd.bat was not found under the detected Visual Studio installation:
-echo   !VSINSTALL!
+echo   %VSINSTALL%
 pause
 exit /b 1
 
