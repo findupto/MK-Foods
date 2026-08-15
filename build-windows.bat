@@ -13,8 +13,12 @@ set "TARGET_ARM64=aarch64-pc-windows-msvc"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VSINSTALL="
 
-if not exist "%VSWHERE%" if exist "%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe" set "VSWHERE=%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%VSWHERE%" goto :vswhere_ready
+if exist "%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe" set "VSWHERE=%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%VSWHERE%" goto :vswhere_ready
+goto :msvc_missing
 
+:vswhere_ready
 echo.
 echo ================================================================
 echo       MK FOODS POS - WINDOWS INSTALLER BUILD
@@ -45,26 +49,14 @@ if errorlevel 1 goto :rust_missing
 echo.
 echo [3/9] Detecting Visual Studio C++ MSVC tools
 echo ---------------------------------------------------------------
-if not exist "%VSWHERE%" (
-  echo ERROR: Visual Studio Installer / vswhere.exe was not found.
-  goto :msvc_missing
-)
 for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do if not defined VSINSTALL set "VSINSTALL=%%I"
-if not defined VSINSTALL (
-  echo ERROR: Visual Studio C++ MSVC build tools were not found.
-  goto :msvc_missing
-)
-if not exist "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" (
-  echo ERROR: Visual Studio developer command environment was not found.
-  goto :msvc_missing
-)
-echo Visual Studio: %VSINSTALL%
-call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
-if errorlevel 1 goto :msvc_missing
+if not defined VSINSTALL goto :msvc_not_found
+if not exist "!VSINSTALL!\Common7\Tools\VsDevCmd.bat" goto :vsdevcmd_missing
+echo Visual Studio: !VSINSTALL!
+call "!VSINSTALL!\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
+if errorlevel 1 goto :msvc_init_failed
 where cl.exe >nul 2>nul
-if errorlevel 1 goto :msvc_missing
-cl.exe 2>&1 | findstr /c:"Microsoft" >nul
-if errorlevel 1 goto :msvc_missing
+if errorlevel 1 goto :cl_missing
 echo MSVC compiler ready.
 
 echo.
@@ -95,13 +87,18 @@ echo.
 echo [7/9] Preparing application icon
 echo ---------------------------------------------------------------
 if not exist "src-tauri\icons" mkdir "src-tauri\icons"
-if not exist "src-tauri\icons\mk-foods-icon.svg" (
-  >"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="#111111"/^>^<circle cx="512" cy="512" r="360" fill="#ffffff"/^>^<text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111"^>MK^</text^>^<circle cx="512" cy="205" r="34" fill="#111111"/^>^</svg^>
-)
-if not exist "src-tauri\icons\icon.ico" (
-  call npx.cmd --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
-  if errorlevel 1 goto :icon_error
-)
+if not exist "src-tauri\icons\mk-foods-icon.svg" goto :create_svg
+if exist "src-tauri\icons\icon.ico" goto :icon_ready
+call npx.cmd --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
+if errorlevel 1 goto :icon_error
+goto :icon_ready
+
+:create_svg
+>"src-tauri\icons\mk-foods-icon.svg" echo ^<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"^>^<rect width="1024" height="1024" rx="180" fill="#111111"/^>^<circle cx="512" cy="512" r="360" fill="#ffffff"/^>^<text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111"^>MK^</text^>^<circle cx="512" cy="205" r="34" fill="#111111"/^>^</svg^
+call npx.cmd --no-install tauri icon "src-tauri\icons\mk-foods-icon.svg"
+if errorlevel 1 goto :icon_error
+
+:icon_ready
 if not exist "src-tauri\icons\icon.ico" goto :icon_error
 
 echo.
@@ -154,7 +151,7 @@ echo ---------------------------------------------------------------
 set "VSCMD_ARCH=x64"
 if /i "%ARCH%"=="x86" set "VSCMD_ARCH=x86"
 if /i "%ARCH%"=="ARM64" set "VSCMD_ARCH=arm64"
-call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=%VSCMD_ARCH% -host_arch=x64 >nul
+call "!VSINSTALL!\Common7\Tools\VsDevCmd.bat" -arch=!VSCMD_ARCH! -host_arch=x64 >nul
 if errorlevel 1 (
   echo ERROR: Visual Studio could not initialize the %ARCH% compiler environment.
   exit /b 1
@@ -193,13 +190,31 @@ exit /b 1
 
 :msvc_missing
 echo.
-echo ERROR: Visual Studio C++ MSVC build tools are required to build bundled SQLite and the Windows installers.
-echo Install Visual Studio Build Tools with:
-echo   Desktop development with C++
-echo   MSVC C++ build tools for x64/x86
-echo   MSVC C++ ARM64 build tools
-echo   Windows 10/11 SDK
-echo Then reopen this terminal and run build-windows.bat again.
+echo ERROR: Visual Studio Installer / vswhere.exe was not found.
+echo Install Visual Studio Build Tools with Desktop development with C++.
+pause
+exit /b 1
+
+:msvc_not_found
+echo ERROR: Visual Studio C++ MSVC build tools were not found.
+echo Install Desktop development with C++, MSVC C++ build tools, ARM64 C++ tools, and a Windows SDK.
+pause
+exit /b 1
+
+:vsdevcmd_missing
+echo ERROR: VsDevCmd.bat was not found under the detected Visual Studio installation:
+echo   !VSINSTALL!
+pause
+exit /b 1
+
+:msvc_init_failed
+echo ERROR: Visual Studio could not initialize its MSVC environment.
+pause
+exit /b 1
+
+:cl_missing
+echo ERROR: cl.exe is unavailable after initializing Visual Studio.
+echo Install the required MSVC C++ workload and Windows SDK.
 pause
 exit /b 1
 
