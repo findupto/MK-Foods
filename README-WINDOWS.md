@@ -8,18 +8,37 @@ From the project folder, double-click:
 
 It automatically:
 
-1. Adds the user Rust/Cargo directory to PATH for this build.
-2. Checks Node.js, npm, Cargo and Rustc.
+1. Checks Node.js, npm, Cargo and Rustc.
+2. Detects Visual Studio and initializes the matching MSVC developer environment.
 3. Installs/repairs the npm/Tauri dependencies.
-4. Creates the MK Foods application icon when it is missing.
-5. Validates Cargo metadata.
-6. Builds the production Tauri application.
-7. Builds the NSIS Windows setup EXE.
-8. Copies the final installer to:
+4. Runs the project test suite before building.
+5. Installs the x64, x86 and ARM64 Rust Windows targets when missing.
+6. Creates the MK Foods application icon when it is missing.
+7. Validates Cargo metadata.
+8. Builds the production Tauri application for each Windows architecture.
+9. Builds the NSIS Windows setup EXE for each architecture.
+10. Copies the final installers to:
 
 `dist\MK-Foods-POS-Windows-Setup-x64.exe`
 
-9. Opens the `dist` folder automatically when finished.
+`dist\MK-Foods-POS-Windows-Setup-x86.exe`
+
+`dist\MK-Foods-POS-Windows-Setup-ARM64.exe`
+
+11. Opens the `dist` folder automatically when finished.
+
+## Required build tools
+
+The installer build uses `rusqlite` with bundled SQLite, so a working MSVC C/C++ compiler is required even when Rust itself is installed correctly.
+
+Install **Visual Studio Build Tools** or Visual Studio with:
+
+- Desktop development with C++
+- MSVC C++ build tools
+- Windows 10 or Windows 11 SDK
+- ARM64 C++ tools if the ARM64 installer is required
+
+The build script automatically locates Visual Studio through `vswhere.exe` and initializes the compiler environment separately for x64, x86 and ARM64. If the required workload is missing, it stops early with a clear message instead of failing several minutes into a Rust build.
 
 ## Installer behavior
 
@@ -27,14 +46,24 @@ The NSIS installer is configured for a normal Windows installation flow with a s
 
 The application itself is built as a Windows GUI application, so the installed POS does not open a command prompt behind it.
 
-## Supported Windows target
+## Supported Windows targets
 
-The default build is **64-bit Windows (x64)**. Tauri supports Windows 10 and Windows 11; the WebView2 installer handles the runtime when required.
+The project can build **64-bit Windows (x64)**, **32-bit Windows (x86)** and **ARM64 Windows** installers. Tauri supports Windows 10 and Windows 11; the WebView2 bootstrapper handles the runtime when required.
+
+For normal modern Windows PCs, use the x64 installer. Use ARM64 on Windows-on-ARM devices and x86 only for legacy 32-bit Windows systems.
 
 ## Manual command
 
-If everything is already installed and the icon has been generated, the equivalent command is:
+If everything is already installed and the icon has been generated, the equivalent x64 command is:
 
 `npx tauri build --bundles nsis`
+
+For explicit targets:
+
+`npx tauri build --bundles nsis --target x86_64-pc-windows-msvc`
+
+`npx tauri build --bundles nsis --target i686-pc-windows-msvc`
+
+`npx tauri build --bundles nsis --target aarch64-pc-windows-msvc`
 
 Do not type `tauri-cli 2.x.x` as a command. `npx tauri --version` prints the installed CLI version; it is output, not a command.
