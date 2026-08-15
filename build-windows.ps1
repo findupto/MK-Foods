@@ -5,9 +5,9 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 $Out = Join-Path $Root 'dist'
 $Targets = @(
-    @{ Name = 'x64';   Target = 'x86_64-pc-windows-msvc'; VsArch = 'x64';       HostArch = 'x64' },
-    @{ Name = 'x86';   Target = 'i686-pc-windows-msvc';   VsArch = 'x86';       HostArch = 'x64' },
-    @{ Name = 'ARM64'; Target = 'aarch64-pc-windows-msvc'; VsArch = 'arm64';    HostArch = 'x64' }
+    @{ Name = 'x64'; Target = 'x86_64-pc-windows-msvc'; VsArch = 'x64'; CompilerArch = 'x64' },
+    @{ Name = 'x86'; Target = 'i686-pc-windows-msvc';   VsArch = 'x86'; CompilerArch = 'x86' },
+    @{ Name = 'ARM64'; Target = 'aarch64-pc-windows-msvc'; VsArch = 'amd64_arm64'; CompilerArch = 'arm64' }
 )
 
 function Write-Step([string]$Text) {
@@ -17,19 +17,16 @@ function Write-Step([string]$Text) {
 
 function Invoke-Native([string]$File, [string[]]$Arguments) {
     & $File @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE`: $File $($Arguments -join ' ')"
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE`: $File $($Arguments -join ' ')" }
 }
 
 function Find-VsWhere {
-    $candidates = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'),
-        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\Installer\vswhere.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    $candidates = @()
+    if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe') }
+    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'Microsoft Visual Studio\Installer\vswhere.exe') }
     $cmd = Get-Command vswhere.exe -ErrorAction SilentlyContinue
     if ($cmd) { $candidates += $cmd.Source }
-    $candidates | Select-Object -Unique | Select-Object -First 1
+    $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique | Select-Object -First 1
 }
 
 function Find-VisualStudio {
@@ -37,111 +34,128 @@ function Find-VisualStudio {
     if ($vswhere) {
         try {
             $path = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Select-Object -First 1)
-            if ($path) {
-                $path = ([string]$path).Trim()
-                if ($path -and (Test-Path -LiteralPath (Join-Path $path 'VC\Auxiliary\Build\vcvarsall.bat'))) { return $path }
-            }
+            if ($path) { $path = ([string]$path).Trim() }
+            if ($path -and (Test-Path -LiteralPath (Join-Path $path 'VC\Auxiliary\Build\vcvarsall.bat'))) { return $path }
         } catch { }
     }
-
-    $roots = @(
-        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio'),
-        (Join-Path $env:ProgramFiles 'Microsoft Visual Studio')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-    foreach ($root in $roots) {
+    $roots = @()
+    if (${env:ProgramFiles(x86)}) { $roots += (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio') }
+    if ($env:ProgramFiles) { $roots += (Join-Path $env:ProgramFiles 'Microsoft Visual Studio') }
+    foreach ($root in $roots | Where-Object { Test-Path -LiteralPath $_ }) {
         $matches = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
             ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Directory -ErrorAction SilentlyContinue } |
             Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'VC\Auxiliary\Build\vcvarsall.bat') } |
             Sort-Object FullName -Descending
         if ($matches) { return $matches[0].FullName }
     }
-
-    $regPaths = @(
-        'HKLM:\SOFTWARE\Microsoft\VisualStudio\SxS\VS7',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\SxS\VS7'
-    )
-    foreach ($regPath in $regPaths) {
-        try {
-            $item = Get-ItemProperty -Path $regPath -ErrorAction Stop
-            foreach ($property in $item.PSObject.Properties) {
-                if ($property.Name -match '^\d+\.\d+$' -and $property.Value) {
-                    $candidate = ([string]$property.Value).TrimEnd('\')
-                    if (Test-Path -LiteralPath (Join-Path $candidate 'VC\Auxiliary\Build\vcvarsall.bat')) { return $candidate }
-                }
-            }
-        } catch { }
-    }
     throw 'Visual Studio C++ Build Tools with vcvarsall.bat could not be located.'
 }
 
-function Import-EnvironmentLines([string[]]$Lines) {
-    foreach ($line in $Lines) {
-        $text = [string]$line
-        $idx = $text.IndexOf('=')
-        if ($idx -gt 0) {
-            $name = $text.Substring(0, $idx)
-            $value = $text.Substring($idx + 1)
-            if ($name -notmatch '^(ERRORLEVEL|CD)$') {
-                [Environment]::SetEnvironmentVariable($name, $value, 'Process')
-            }
-        }
+function Get-ShortPath([string]$Path) {
+    if (-not ('MKFoods.NativeMethods' -as [type])) {
+        Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class MKFoods_NativeMethods {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    public static extern uint GetShortPathName(string lpszLongPath, StringBuilder lpszShortPath, int cchBuffer);
+}
+'@
     }
+    $sb = New-Object System.Text.StringBuilder 1024
+    $len = [MKFoods_NativeMethods]::GetShortPathName($Path, $sb, $sb.Capacity)
+    if ($len -gt 0) { return $sb.ToString() }
+    return $Path
 }
 
-function Import-VcVars([string]$VsInstall, [string]$VcVarsAll, [string]$Arch, [string]$HostArch) {
-    Write-Host "Initializing MSVC environment: $Arch (host $HostArch)"
+function Import-VcVars([string]$VcVarsAll, [string]$Arch, [string]$CompilerArch) {
+    Write-Host "Initializing MSVC environment: $Arch"
 
-    # Method 1: vcvarsall.bat. Capture its diagnostics instead of hiding them.
-    $cmdLine = 'call "{0}" {1} 2>&1 && set' -f $VcVarsAll, $Arch
-    $lines = @(& cmd.exe /d /s /c $cmdLine)
-    $code = $LASTEXITCODE
-    if ($code -eq 0) {
-        Import-EnvironmentLines $lines
-        if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
-            Write-Host 'MSVC environment initialized with vcvarsall.bat.' -ForegroundColor Green
+    # VS 18 BuildTools on this machine contains cmd batch logic that breaks when
+    # invoked from the long Program Files (x86) path. Use the DOS 8.3 path first.
+    $shortVcVars = Get-ShortPath $VcVarsAll
+    $shortVsRoot = Get-ShortPath (Split-Path (Split-Path (Split-Path $VcVarsAll -Parent) -Parent) -Parent)
+    Write-Host "MSVC short path: $shortVcVars"
+
+    $tmp = Join-Path $env:TEMP ("mk-foods-vcvars-{0}.cmd" -f ([guid]::NewGuid().ToString('N')))
+    $envFile = Join-Path $env:TEMP ("mk-foods-env-{0}.txt" -f ([guid]::NewGuid().ToString('N')))
+    try {
+        @"
+@echo off
+set "VSINSTALLDIR=$shortVsRoot"
+call "$shortVcVars" $Arch > "$envFile" 2>&1
+set "MK_VC_EXIT=%ERRORLEVEL%"
+set > "$envFile.env"
+echo %MK_VC_EXIT%> "$envFile.exit"
+exit /b %MK_VC_EXIT%
+"@ | Set-Content -LiteralPath $tmp -Encoding ASCII
+
+        & cmd.exe /d /c $tmp
+        $exitFile = "$envFile.exit"
+        $savedExit = 255
+        if (Test-Path -LiteralPath $exitFile) { $savedExit = [int](Get-Content -LiteralPath $exitFile -Raw).Trim() }
+        $diagnostics = if (Test-Path -LiteralPath $envFile) { Get-Content -LiteralPath $envFile -Raw } else { '' }
+        $envDump = "$envFile.env"
+
+        if ($savedExit -eq 0 -and (Test-Path -LiteralPath $envDump)) {
+            foreach ($line in Get-Content -LiteralPath $envDump) {
+                $idx = $line.IndexOf('=')
+                if ($idx -gt 0) {
+                    $name = $line.Substring(0,$idx)
+                    $value = $line.Substring($idx+1)
+                    if ($name -notmatch '^(ERRORLEVEL|CD)$') { [Environment]::SetEnvironmentVariable($name,$value,'Process') }
+                }
+            }
+        } else {
+            Write-Host "vcvarsall failed with exit code $savedExit." -ForegroundColor DarkYellow
+            if ($diagnostics) { Write-Host $diagnostics }
+        }
+
+        if ($savedExit -eq 0 -and (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+            Write-Host "MSVC compiler ready: $((Get-Command cl.exe).Source)" -ForegroundColor Green
             return
         }
-    }
 
-    Write-Host "vcvarsall method failed with exit code $code. Trying VsDevCmd fallback..." -ForegroundColor Yellow
-
-    # Method 2: VsDevCmd.bat, using the architecture names accepted by VS 2022/18.
-    $vsDevCmd = Join-Path $VsInstall 'Common7\Tools\VsDevCmd.bat'
-    if (Test-Path -LiteralPath $vsDevCmd) {
-        $devArch = switch ($Arch) {
-            'x64'    { 'x64' }
-            'x86'    { 'x86' }
-            'arm64'  { 'arm64' }
-            default  { $Arch }
+        # Direct compiler fallback: locate the exact MSVC toolset and prepend its
+        # bin/include/lib paths. This avoids all VS batch-file parsers entirely.
+        $msvcRoot = Join-Path (Split-Path $VcVarsAll -Parent | Split-Path -Parent | Split-Path -Parent) 'Tools\MSVC'
+        $toolset = Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        if (-not $toolset) { throw "MSVC toolset directory not found: $msvcRoot" }
+        $bin = Join-Path $toolset.FullName "bin\Hostx64\$CompilerArch"
+        if (-not (Test-Path -LiteralPath (Join-Path $bin 'cl.exe'))) {
+            $bin = Join-Path $toolset.FullName "bin\Hostx86\$CompilerArch"
         }
-        $cmdLine2 = 'call "{0}" -arch={1} -host_arch={2} 2>&1 && set' -f $vsDevCmd, $devArch, $HostArch
-        $lines2 = @(& cmd.exe /d /s /c $cmdLine2)
-        $code2 = $LASTEXITCODE
-        if ($code2 -eq 0) {
-            Import-EnvironmentLines $lines2
-            if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
-                Write-Host 'MSVC environment initialized with VsDevCmd.bat fallback.' -ForegroundColor Green
-                return
-            }
-        }
-        Write-Host "VsDevCmd fallback failed with exit code $code2." -ForegroundColor Yellow
-    }
+        if (-not (Test-Path -LiteralPath (Join-Path $bin 'cl.exe'))) { throw "cl.exe for $CompilerArch was not found in $($toolset.FullName)." }
 
-    # Method 3: diagnose the installation instead of giving a useless exit 255.
-    $vcTools = Join-Path $VsInstall 'VC\Tools\MSVC'
-    $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10'
-    Write-Host "MSVC tools directory: $vcTools"
-    Write-Host "Windows SDK directory: $sdkRoot"
-    if (-not (Test-Path -LiteralPath $vcTools)) { Write-Host 'MISSING: VC\Tools\MSVC' -ForegroundColor Red }
-    if (-not (Test-Path -LiteralPath $sdkRoot)) { Write-Host 'MISSING: Windows 10 SDK root' -ForegroundColor Red }
-    $clCandidates = @()
-    if (Test-Path -LiteralPath $vcTools) {
-        $clCandidates = Get-ChildItem -LiteralPath $vcTools -Filter cl.exe -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 10
-    }
-    if ($clCandidates) { Write-Host 'Detected cl.exe files:'; $clCandidates | ForEach-Object { Write-Host "  $($_.FullName)" } }
+        $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10'
+        $sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'Include') -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        $sdkLib = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'Lib') -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        if (-not $sdkVersion -or -not $sdkLib) { throw "Windows 10/11 SDK was not found under $sdkRoot." }
 
-    $tail = ($lines | Select-Object -Last 20) -join [Environment]::NewLine
-    throw "MSVC environment initialization failed for $Arch. vcvarsall exit code: $code. Last diagnostics:`n$tail`n`nInstall/repair Visual Studio Build Tools with Desktop development with C++, MSVC v143/vNext C++ build tools, Windows SDK, and ARM64/x86 C++ tools."
+        $include = @(
+            (Join-Path $toolset.FullName 'include'),
+            (Join-Path $sdkVersion.FullName 'ucrt'),
+            (Join-Path $sdkVersion.FullName 'shared'),
+            (Join-Path $sdkVersion.FullName 'um')
+        ) -join ';'
+        $libArch = switch ($CompilerArch) { 'x64' {'x64'} 'x86' {'x86'} 'arm64' {'arm64'} }
+        $lib = @(
+            (Join-Path $toolset.FullName "lib\$CompilerArch"),
+            (Join-Path $sdkLib.FullName "ucrt\$libArch"),
+            (Join-Path $sdkLib.FullName "um\$libArch")
+        ) -join ';'
+        $env:PATH = "$bin;$($toolset.FullName)\bin;$env:PATH"
+        $env:INCLUDE = $include
+        $env:LIB = $lib
+        $env:VCToolsInstallDir = "$($toolset.FullName)\"
+        $env:VCToolsVersion = $toolset.Name
+        if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw "Direct MSVC fallback could not activate cl.exe." }
+        Write-Host "MSVC compiler ready via direct toolchain fallback: $((Get-Command cl.exe).Source)" -ForegroundColor Green
+    }
+    finally {
+        Remove-Item -LiteralPath $tmp,$envFile,"$envFile.env","$envFile.exit" -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host '================================================================' -ForegroundColor Yellow
@@ -153,28 +167,23 @@ try {
     Write-Step '[1/9] Checking Node.js / npm'
     $node = Get-Command node.exe -ErrorAction Stop
     $npm = Get-Command npm.cmd -ErrorAction Stop
-    & $node.Source --version
-    & $npm.Source --version
+    & $node.Source --version; & $npm.Source --version
 
     Write-Step '[2/9] Checking Rust / Cargo'
     $cargo = Get-Command cargo.exe -ErrorAction Stop
     $rustc = Get-Command rustc.exe -ErrorAction Stop
     $rustup = Get-Command rustup.exe -ErrorAction Stop
-    & $cargo.Source --version
-    & $rustc.Source --version
-    & $rustup.Source --version
+    & $cargo.Source --version; & $rustc.Source --version; & $rustup.Source --version
 
     Write-Step '[3/9] Detecting Visual Studio C++ MSVC tools'
     $vsInstall = Find-VisualStudio
     $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvarsall.bat'
     Write-Host "Visual Studio: $vsInstall"
     Write-Host "MSVC entry point: $vcvars"
-    Import-VcVars $vsInstall $vcvars 'x64' 'x64'
-    Write-Host 'MSVC compiler ready.' -ForegroundColor Green
+    Import-VcVars $vcvars 'x64' 'x64'
 
     Write-Step '[4/9] Installing / repairing npm dependencies'
     Invoke-Native $npm.Source @('install','--include=dev')
-
     Write-Step '[5/9] Running project tests'
     Invoke-Native $npm.Source @('test')
 
@@ -184,15 +193,9 @@ try {
     foreach ($entry in $Targets) { Invoke-Native $rustup.Source @('target','add',$entry.Target) }
 
     Write-Step '[7/9] Preparing application icon'
-    $icons = Join-Path $Root 'src-tauri\icons'
-    New-Item -ItemType Directory -Force -Path $icons | Out-Null
-    $svg = Join-Path $icons 'mk-foods-icon.svg'
-    $ico = Join-Path $icons 'icon.ico'
-    if (-not (Test-Path -LiteralPath $svg)) {
-@'
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><rect width="1024" height="1024" rx="180" fill="#111111"/><circle cx="512" cy="512" r="360" fill="#ffffff"/><text x="512" y="625" text-anchor="middle" font-family="Arial, Segoe UI, sans-serif" font-size="300" font-weight="700" fill="#111111">MK</text><circle cx="512" cy="205" r="34" fill="#111111"/></svg>
-'@ | Set-Content -LiteralPath $svg -Encoding UTF8
-    }
+    $icons = Join-Path $Root 'src-tauri\icons'; New-Item -ItemType Directory -Force -Path $icons | Out-Null
+    $svg = Join-Path $icons 'mk-foods-icon.svg'; $ico = Join-Path $icons 'icon.ico'
+    if (-not (Test-Path -LiteralPath $svg)) { '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" rx="180"/><text x="512" y="620" text-anchor="middle" font-size="300" fill="white">MK</text></svg>' | Set-Content -LiteralPath $svg -Encoding UTF8 }
     if (-not (Test-Path -LiteralPath $ico)) { Invoke-Native $npx.Source @('--no-install','tauri','icon',$svg) }
     if (-not (Test-Path -LiteralPath $ico)) { throw "Tauri did not create $ico" }
 
@@ -202,25 +205,20 @@ try {
     Write-Step '[9/9] Building NSIS installers for x64, x86 and ARM64'
     if (Test-Path -LiteralPath $Out) { Remove-Item -LiteralPath $Out -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $Out | Out-Null
-
     foreach ($entry in $Targets) {
         Write-Host "`n---------------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host "Building $($entry.Name) - $($entry.Target)" -ForegroundColor Yellow
         Write-Host "---------------------------------------------------------------" -ForegroundColor DarkGray
-        Import-VcVars $vsInstall $vcvars $entry.VsArch $entry.HostArch
+        Import-VcVars $vcvars $entry.VsArch $entry.CompilerArch
         $bundle = Join-Path $Root "src-tauri\target\$($entry.Target)\release\bundle\nsis"
         if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }
         Invoke-Native $npx.Source @('--no-install','tauri','build','--bundles','nsis','--target',$entry.Target)
         $installer = Get-ChildItem -LiteralPath $bundle -Filter '*-setup.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $installer) { throw "No NSIS installer was produced for $($entry.Name). Expected: $bundle" }
-        $destination = Join-Path $Out "MK-Foods-POS-Windows-Setup-$($entry.Name).exe"
-        Copy-Item -LiteralPath $installer.FullName -Destination $destination -Force
-        Write-Host "$($entry.Name) installer created: $destination" -ForegroundColor Green
+        Copy-Item -LiteralPath $installer.FullName -Destination (Join-Path $Out "MK-Foods-POS-Windows-Setup-$($entry.Name).exe") -Force
+        Write-Host "$($entry.Name) installer created successfully." -ForegroundColor Green
     }
-
-    Write-Host "`n================================================================" -ForegroundColor Green
-    Write-Host 'SUCCESS - ALL WINDOWS INSTALLERS ARE READY' -ForegroundColor Green
-    Write-Host '================================================================' -ForegroundColor Green
+    Write-Host "`n================================================================`nSUCCESS - ALL WINDOWS INSTALLERS ARE READY`n================================================================" -ForegroundColor Green
     Get-ChildItem -LiteralPath $Out -Filter '*.exe' | Select-Object Name,Length,FullName | Format-Table -AutoSize
     exit 0
 }
