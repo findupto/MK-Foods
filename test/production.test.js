@@ -10,6 +10,7 @@ const tauri = read('src/renderer/tauri.js');
 const index = read('src/renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
 const workflow = read('.github/workflows/build-windows.yml');
+const windowsBuild = read('build-windows.bat');
 
 function assert(ok, msg) { if (!ok) throw new Error(msg); }
 
@@ -47,5 +48,9 @@ assert(tauri.includes('connectPrinter'), 'Printer connection bridge missing');
 assert(pkg.version === '2.0.0', 'Package version must match Tauri application version');
 assert(workflow.includes('npm test'), 'Windows build must run automated tests');
 assert(!workflow.includes('cache: npm'), 'Windows build must not require a lockfile just to configure npm cache');
+assert(windowsBuild.includes('Microsoft Visual Studio\\Installer\\vswhere.exe'), 'Windows build must detect Visual Studio');
+assert(windowsBuild.includes('VsDevCmd.bat'), 'Windows build must initialize the MSVC environment');
+assert(windowsBuild.includes('aarch64-pc-windows-msvc'), 'Windows build must keep ARM64 target support');
+assert(windowsBuild.includes('i686-pc-windows-msvc'), 'Windows build must keep x86 target support');
 
 console.log('Production safety and staged order workflow checks passed.');
