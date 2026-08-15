@@ -5,6 +5,8 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const workflow = read('src/renderer/order-workflow.js');
 const index = read('src/renderer/index.html');
 function assert(ok, msg) { if (!ok) throw new Error(msg); }
+assert(index.includes('auth-ui.js'), 'Authentication UI is not loaded');
+assert(index.includes('workflow-session.js'), 'Workflow session bridge is not loaded');
 assert(index.includes('order-workflow.js'), 'Order workflow script is not loaded');
 for (const key of ['collectOrder','forwardKitchen','markPrepared','markCooked','sendToCounter','collectCash','showOrderTracking']) assert(workflow.includes(`window.${key}`), `${key} method missing`);
 for (const key of ['collectedBy','preparedBy','cookedBy','counterBy','cashCollectedBy']) assert(workflow.includes(key), `${key} tracking missing`);
