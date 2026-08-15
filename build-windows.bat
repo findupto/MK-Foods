@@ -12,6 +12,7 @@ set "TARGET_X86=i686-pc-windows-msvc"
 set "TARGET_ARM64=aarch64-pc-windows-msvc"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VSINSTALL="
+set "VSWHERE_TMP=%TEMP%\mk-foods-vswhere-%RANDOM%.txt"
 
 if exist "%VSWHERE%" goto :vswhere_ready
 if exist "%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe" set "VSWHERE=%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -26,14 +27,10 @@ echo      x64 + x86 + ARM64 / NSIS / GUI INSTALLER
 echo ================================================================
 echo.
 
-where node >nul 2>nul || goto :node_missing
-where npm.cmd >nul 2>nul || goto :node_missing
-if not exist "%CARGO_HOME%\bin\cargo.exe" goto :rust_missing
-if not exist "%CARGO_HOME%\bin\rustc.exe" goto :rust_missing
-if not exist "%RUSTUP_HOME%" goto :rust_missing
-
 echo [1/9] Checking Node.js / npm
 echo ---------------------------------------------------------------
+where node >nul 2>nul || goto :node_missing
+where npm.cmd >nul 2>nul || goto :node_missing
 node --version
 call npm.cmd --version
 if errorlevel 1 goto :node_missing
@@ -41,6 +38,9 @@ if errorlevel 1 goto :node_missing
 echo.
 echo [2/9] Checking Rust / Cargo
 echo ---------------------------------------------------------------
+if not exist "%CARGO_HOME%\bin\cargo.exe" goto :rust_missing
+if not exist "%CARGO_HOME%\bin\rustc.exe" goto :rust_missing
+if not exist "%RUSTUP_HOME%" goto :rust_missing
 cargo --version
 rustc --version
 rustup --version
@@ -49,19 +49,21 @@ if errorlevel 1 goto :rust_missing
 echo.
 echo [3/9] Detecting Visual Studio C++ MSVC tools
 echo ---------------------------------------------------------------
-for /f "usebackq delims=" %%I in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do if not defined VSINSTALL set "VSINSTALL=%%I"
+rem Do not capture the Visual Studio path with FOR. VS installations normally
+rem live under "Program Files (x86)", and parentheses in FOR/IF command blocks
+rem can trigger cmd.exe parser errors such as "\\Microsoft was unexpected".
+>"%VSWHERE_TMP%" "%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if errorlevel 1 goto :msvc_not_found
+set /p "VSINSTALL="<"%VSWHERE_TMP%"
+del /q "%VSWHERE_TMP%" >nul 2>nul
 if not defined VSINSTALL goto :msvc_not_found
+if not exist "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" goto :vcvarsall_missing
 echo Visual Studio: %VSINSTALL%
 
-rem Do not put the VSINSTALL path inside an IF/parenthesized block. Visual Studio
-rem commonly lives under "Program Files (x86)", whose parentheses can break cmd.exe
-rem parsing. Push into the Tools directory and invoke VsDevCmd by filename instead.
-pushd "%VSINSTALL%\Common7\Tools" >nul 2>nul
-if errorlevel 1 goto :vsdevcmd_missing
-call VsDevCmd.bat -arch=x64 -host_arch=x64 >nul
-set "VSDEV_ERROR=%errorlevel%"
-popd
-if not "%VSDEV_ERROR%"=="0" goto :msvc_init_failed
+rem vcvarsall.bat is the standard MSVC environment entry point and avoids the
+rem extra VsDevCmd wrapper layer. The quoted CALL safely handles parentheses.
+call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" x64 >nul
+if errorlevel 1 goto :msvc_init_failed
 where cl.exe >nul 2>nul
 if errorlevel 1 goto :cl_missing
 echo MSVC compiler ready.
@@ -157,13 +159,9 @@ echo Building %ARCH% - %TARGET%
 echo ---------------------------------------------------------------
 set "VSCMD_ARCH=x64"
 if /i "%ARCH%"=="x86" set "VSCMD_ARCH=x86"
-if /i "%ARCH%"=="ARM64" set "VSCMD_ARCH=arm64"
-pushd "%VSINSTALL%\Common7\Tools" >nul 2>nul
+if /i "%ARCH%"=="ARM64" set "VSCMD_ARCH=amd64_arm64"
+call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" %VSCMD_ARCH% >nul
 if errorlevel 1 goto :target_msvc_init_failed
-call VsDevCmd.bat -arch=%VSCMD_ARCH% -host_arch=x64 >nul
-set "TARGET_VSDEV_ERROR=%errorlevel%"
-popd
-if not "%TARGET_VSDEV_ERROR%"=="0" goto :target_msvc_init_failed
 where cl.exe >nul 2>nul
 if errorlevel 1 goto :target_cl_missing
 if exist "%TARGET_BUNDLE%" rmdir /s /q "%TARGET_BUNDLE%"
@@ -183,6 +181,7 @@ exit /b 1
 
 :target_msvc_init_failed
 echo ERROR: Visual Studio could not initialize the %ARCH% compiler environment.
+echo Make sure the matching MSVC C++ tools and Windows SDK are installed.
 exit /b 1
 
 :target_cl_missing
@@ -215,9 +214,10 @@ echo Install Desktop development with C++, MSVC C++ build tools, ARM64 C++ tools
 pause
 exit /b 1
 
-:vsdevcmd_missing
-echo ERROR: VsDevCmd.bat was not found under the detected Visual Studio installation:
+:vcvarsall_missing
+echo ERROR: vcvarsall.bat was not found under the detected Visual Studio installation:
 echo   %VSINSTALL%
+echo Repair/install the Desktop development with C++ workload.
 pause
 exit /b 1
 
