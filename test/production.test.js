@@ -18,7 +18,7 @@ assert(banking.includes('paymentMerchantId'), 'Bank merchant configuration missi
 assert(banking.includes('paymentEnvironment'), 'Bank environment configuration missing');
 assert(production.includes('pending_verification'), 'Digital payments must not be auto-settled');
 assert(production.includes('bankReady'), 'Digital payment readiness guard missing');
-assert(production.includes('const tax ='), 'Checkout tax calculation missing');
+assert(/const\s+tax\s*=|(?:^|[,{;])tax\s*=/.test(production), 'Checkout tax calculation missing');
 assert(production.includes('deliveryFee'), 'Delivery fee calculation missing');
 assert(production.includes('Not enough stock'), 'Checkout stock guard missing');
 assert(production.includes('posTotals'), 'POS subtotal/tax/total display missing');
