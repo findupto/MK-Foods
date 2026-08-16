@@ -5,6 +5,55 @@
   const line=(label,value,w=42)=>{const a=clean(label),b=clean(value),spaces=Math.max(1,w-a.length-b.length);return a+' '.repeat(spaces)+b+'\n'};
   const center=(s,w=42)=>{s=clean(s);const left=Math.max(0,Math.floor((w-s.length)/2));return ' '.repeat(left)+s+'\n'};
   const moneyText=v=>`${db?.settings?.currency||'Rs.'} ${n(v).toLocaleString(undefined,{maximumFractionDigits:2})}`;
+
+  // Live Windows printer discovery. The native command enumerates both local
+  // and Windows-connected printers and verifies that each can be opened.
+  window.discoverPrinters = async () => {
+    try {
+      if (!window.mkFoods?.printThermal) return [];
+      const r = await window.mkFoods.printThermal('__DISCOVER__', new Uint8Array());
+      const printers = Array.isArray(r?.printers) ? r.printers : [];
+      window.mkFoodsPrinters = printers;
+      return printers;
+    } catch (e) {
+      console.error('Printer discovery failed', e);
+      window.mkFoodsPrinters = [];
+      return [];
+    }
+  };
+
+  // Populate printer selects without assuming a particular settings-screen ID.
+  // Existing saved selection is preserved when the printer is still present.
+  const populatePrinterSelects = printers => {
+    const selects = [...document.querySelectorAll('select')].filter(el => {
+      const key = `${el.id} ${el.name} ${el.dataset?.setting||''}`.toLowerCase();
+      return key.includes('printer');
+    });
+    for (const select of selects) {
+      const current = select.value || db?.settings?.printerName || '';
+      select.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = printers.length ? 'Select printer…' : 'No Windows printers found';
+      select.appendChild(placeholder);
+      for (const p of printers) {
+        const option = document.createElement('option');
+        option.value = p.name;
+        option.textContent = `${p.name} — ${p.status}`;
+        option.dataset.connection = p.connection || 'windows-raw';
+        option.dataset.online = p.online ? 'true' : 'false';
+        select.appendChild(option);
+      }
+      if ([...select.options].some(o=>o.value===current)) select.value=current;
+    }
+  };
+
+  window.refreshPrinterDiscovery = async () => {
+    const printers = await window.discoverPrinters();
+    populatePrinterSelects(printers);
+    return printers;
+  };
+
   window.printReceipt=async order=>{
     try{
       const printer=db?.settings?.receiptPrinter||db?.settings?.printerName;
@@ -27,4 +76,9 @@
       window.mkFoodsUX?.toast('Receipt sent to printer');
     }catch(e){console.error(e);window.mkFoodsUX?.toast(`Receipt failed: ${e.message||e}`)}
   };
+
+  window.addEventListener('DOMContentLoaded', () => {
+    // Delay until the native bridge and settings data are initialized.
+    setTimeout(() => { window.refreshPrinterDiscovery?.(); }, 700);
+  });
 })();
