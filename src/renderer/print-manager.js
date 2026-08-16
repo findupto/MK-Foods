@@ -14,7 +14,7 @@
   async function printOrder(id){const o=read().find(x=>x.id===id);if(!o)return;if(!printer()){if(typeof toast==='function')toast('Select a thermal printer first.',true);return}try{const bytes=thermal(o);let r=null,lastError='';if(typeof window.mkFoods?.printThermal==='function'){try{r=await window.mkFoods.printThermal(printer(),bytes)}catch(e){lastError=String(e?.message||e)}}if((!r||r.ok===false)&&typeof window.printThermalBytes==='function'){try{r=await window.printThermalBytes(bytes)}catch(e){lastError=String(e?.message||e)}}if(!r||r.ok===false)throw new Error(r?.reason||lastError||'THERMAL_PRINT_FAILED');write(read().map(x=>x.id===id?{...x,printStatus:'printed',printedAt:new Date().toISOString(),printError:''}:x));if(typeof toast==='function')toast(`${id} sent to ${printer()}`);renderManager()}catch(e){const message=friendlyError(e);write(read().map(x=>x.id===id?{...x,printStatus:'error',printError:message}:x));if(typeof toast==='function')toast(message,true);renderManager()}}
   const passPrintJob=printOrder;
   const systemPrint=()=>window.print();
-  window.printReceipt=order=>{const ok=queue(order);if(ok)go('printmanager');};
+  window.printReceipt = order => { queue(order); go('printmanager'); };
   window.queueOrderForPrint=window.printReceipt;
   window.removePrintOrder=removePrintOrder;
   window.printQueuedOrder=printOrder;
