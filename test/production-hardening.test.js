@@ -1,0 +1,11 @@
+const fs=require('fs');
+const path=require('path');
+const src=fs.readFileSync(path.join(__dirname,'../src/renderer/production-hardening.js'),'utf8');
+for(const x of ['transitions','allocatePayment','promotionTotal','consumeRecipe','reconcileShift','snapshot','approvalLog','notifications'])if(!src.includes(x))throw new Error(`Production hardening capability missing: ${x}`);
+const sandbox={localStorage:{getItem:()=>null,setItem:()=>{}},window:{addEventListener:()=>{}}};
+const vm=require('vm');vm.createContext(sandbox);vm.runInContext(src,sandbox);
+const p=sandbox.window.mkFoodsProduction;
+let order={status:'draft'};p.transition(order,'confirmed','Cashier');p.transition(order,'held','Cashier');p.transition(order,'draft','Cashier');
+const pay=p.allocatePayment(100,[{method:'cash',amount:60},{method:'card',amount:30}]);if(pay.paid!==90||pay.due!==10)throw new Error('Payment allocation failed');
+const r={items:[{name:'Cheese',qty:100,cost:2}]};if(p.recipeCost(r)!==200)throw new Error('Recipe costing failed');
+console.log('Production hardening checks passed.');
