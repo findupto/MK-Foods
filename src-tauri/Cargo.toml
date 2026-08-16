@@ -1,6 +1,6 @@
 [package]
 name = "mk-foods-pos"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2021"
 description = "Enterprise Point-of-Sale System for MK Pizza & Ice Bar"
 authors = ["MK Foods Team"]
