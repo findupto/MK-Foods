@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  // Compatibility + hardened kitchen transition layer.  The main workflow keeps
+  // Compatibility + hardened kitchen transition layer. The main workflow keeps
   // its v2 state private, so this small bridge reads/writes the same durable
   // workflow record without depending on private closures.
   const KEY = 'mkfoods.order.workflow.v2';
@@ -49,6 +49,23 @@
     toast(`${kitchen || 'Kitchen'} marked cooked.`, 'success');
     if (typeof window.renderOrderFlow === 'function') window.renderOrderFlow();
   });
+
+  // Customer history compatibility contract. Keep this available from the
+  // workflow contract as well as customer-history.js so older builds/tests and
+  // integrations cannot lose the search API when scripts are reordered.
+  window.customerHistorySearch = window.customerHistorySearch || function customerHistorySearch(query = '') {
+    const q = String(query || '').trim().toLowerCase();
+    const orders = Array.isArray(window.db?.orders) ? window.db.orders : [];
+    const customers = Array.isArray(window.db?.customers) ? window.db.customers : [];
+    return orders.filter(order => {
+      if (!q) return true;
+      const customer = customers.find(c => c.id === order.customerId);
+      return [
+        order.id, order.customerId, order.customerName, order.phone, order.address,
+        customer?.name, customer?.phone, customer?.mobile, customer?.email
+      ].filter(Boolean).join(' ').toLowerCase().includes(q);
+    }).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  };
 
   // Keep the legacy contract available for older integrations.
   window.markPreparedAndCooked = window.markCooked;
