@@ -10,7 +10,7 @@
     addStaff:data=>action('add_staff',data),updateStaff:(id,data)=>action('update_staff',{...data,id}),deleteStaff:id=>action('deactivate_staff',{id}),addCounter:data=>action('add_counter',data),updateCounter:(id,data)=>action('update_counter',{...data,id}),
     addExpense:data=>action('add_expense',data),deleteExpense:id=>action('delete_expense',{id}),stockAdjust:(productId,qty,reason)=>action('stock_adjust',{productId,qty,reason}),addSupplier:data=>action('add_supplier',data),addPurchase:data=>action('add_purchase',data),
     saveProduct:p=>safe('save_product',{p}),deleteProduct:id=>safe('delete_product',{id}),replaceProducts:p=>safe('replace_products',{products:p}),updateSettings:s=>safe('update_settings',{settings:s}),discoverPrinters:()=>safe('discover_printers'),connectPrinter:name=>safe('connect_printer',{name}),
-    printThermal:(printer,data)=>action('thermal_print',{printer,data}),
+    printThermal:(printer,data)=>safe('print_thermal',{printer,data:Array.from(data instanceof Uint8Array?data:new Uint8Array(data))}),
     exportMenu:async()=>{const path=await dialog.save({defaultPath:'mk-foods-menu.csv',filters:[{name:'CSV',extensions:['csv']}]});return path?safe('export_menu',{path}):null},
     importMenu:async()=>{const path=await dialog.open({multiple:false,directory:false,filters:[{name:'CSV',extensions:['csv']}]});return path?safe('import_menu',{path}):null}
   };
