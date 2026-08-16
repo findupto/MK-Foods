@@ -18,11 +18,14 @@ Tauri uses the operating system's native web renderer instead of bundling Electr
 - Role-based authentication, PBKDF2 password hashing, session expiry and account lockout.
 - Audit logging and controlled privileged operations.
 - Orders, tables, KDS, delivery, riders, customers/loyalty, inventory, procurement, suppliers, expenses, shifts and reporting.
-- Receipt/printer discovery and connection paths for supported Windows/Bluetooth/COM hardware.
+- Receipt/KOT printer routing with Windows RAW spooler support.
+- Multi-path Bluetooth thermal printing: Windows PnP/BTHENUM discovery, Bluetooth SPP virtual COM discovery, direct Bluetooth Classic SPP by MAC, Windows spooler fallback, and manual MAC/COM connection.
+- Real ESC/POS test-print validation before a Bluetooth route is saved.
 - Digital-payment verification state that does not fake bank settlement.
 - Enterprise cloud sync API with idempotency, rate limiting, request IDs, bounded payloads and location-scoped event streams.
 - Persistent cloud event storage with atomic writes and recovery backup.
 - Production authentication and CORS controls through environment configuration.
+- Automated Node, renderer contract, Linux Rust-check and Windows installer CI paths.
 
 ## Offline operation
 
@@ -41,7 +44,7 @@ Change these credentials before production deployment.
 
 MK Pizza & Ice Bar · Collage Road Abbas Chowk, Bhakkar, Pakistan · 0316 9700025 · Rs. · 0% tax.
 
-Configure the receipt printer Bluetooth MAC from Settings.
+Printer setup and multi-path Bluetooth discovery are available from **Printers** in the POS Settings area. See `docs/BLUETOOTH-PRINTERS.md` for transport details and production validation guidance.
 
 ## Cloud deployment
 
