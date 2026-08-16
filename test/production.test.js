@@ -11,6 +11,7 @@ const index = read('src/renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
 const workflow = read('.github/workflows/build-windows.yml');
 const windowsBuild = read('build-windows.bat');
+const windowsPowerShell = read('build-windows.ps1');
 
 function assert(ok, msg) { if (!ok) throw new Error(msg); }
 
@@ -21,8 +22,6 @@ assert(banking.includes('paymentMerchantId'), 'Bank merchant configuration missi
 assert(banking.includes('paymentEnvironment'), 'Bank environment configuration missing');
 assert(production.includes('pending_verification'), 'Digital payments must not be auto-settled');
 assert(production.includes('bankReady'), 'Digital payment readiness guard missing');
-// Keep this check implementation-focused rather than depending on one exact declaration style.
-// Checkout must calculate a non-negative tax from the taxable amount and configured tax rate.
 assert(/tax\s*=\s*taxable\s*\*\s*taxRate\s*\/\s*100/.test(production), 'Checkout tax calculation missing');
 assert(/taxable\s*=\s*Math\.max\(0\s*,\s*subtotal\s*-\s*discount\)/.test(production), 'Checkout taxable amount calculation missing');
 assert(/taxRate\s*=\s*Math\.max\(0\s*,\s*num\(db\?\.settings\?\.tax\)\)/.test(production), 'Checkout tax rate configuration missing');
@@ -48,9 +47,14 @@ assert(tauri.includes('connectPrinter'), 'Printer connection bridge missing');
 assert(pkg.version === '2.0.0', 'Package version must match Tauri application version');
 assert(workflow.includes('npm test'), 'Windows build must run automated tests');
 assert(!workflow.includes('cache: npm'), 'Windows build must not require a lockfile just to configure npm cache');
-assert(windowsBuild.includes('Microsoft Visual Studio\\Installer\\vswhere.exe'), 'Windows build must detect Visual Studio');
-assert(windowsBuild.includes('VsDevCmd.bat'), 'Windows build must initialize the MSVC environment');
-assert(windowsBuild.includes('aarch64-pc-windows-msvc'), 'Windows build must keep ARM64 target support');
-assert(windowsBuild.includes('i686-pc-windows-msvc'), 'Windows build must keep x86 target support');
+assert(windowsBuild.includes('build-windows.ps1'), 'Windows launcher must call the PowerShell build');
+assert(windowsPowerShell.includes('Microsoft Visual Studio\\Installer\\vswhere.exe'), 'PowerShell build must detect Visual Studio');
+assert(windowsPowerShell.includes('Find-VisualStudio'), 'PowerShell build must have Visual Studio discovery');
+assert(windowsPowerShell.includes('Activate-DirectMsvc'), 'PowerShell build must have direct MSVC activation');
+assert(windowsPowerShell.includes('vcvarsall.bat'), 'PowerShell build must have vcvarsall fallback');
+assert(windowsPowerShell.includes('VsDevCmd.bat'), 'PowerShell build must have VsDevCmd fallback');
+assert(windowsPowerShell.includes('Try-BatchMsvc'), 'PowerShell build must automatically try fallback activation');
+assert(windowsPowerShell.includes('aarch64-pc-windows-msvc'), 'Windows build must keep ARM64 target support');
+assert(windowsPowerShell.includes('i686-pc-windows-msvc'), 'Windows build must keep x86 target support');
 
-console.log('Production safety and staged order workflow checks passed.');
+console.log('Production safety, staged workflow, and Windows build checks passed.');
