@@ -80,19 +80,48 @@ unsafe fn enumerate_printers() -> Result<Vec<Value>, String> {
     Ok(result)
 }
 
+#[cfg(windows)]
+fn enumerate_bluetooth_devices() -> Result<Vec<Value>, String> {
+    use std::process::Command;
+    let script = r#"$ErrorActionPreference='SilentlyContinue'; $x=Get-PnpDevice -Class Bluetooth | Where-Object {$_.FriendlyName -and $_.FriendlyName -notmatch 'Bluetooth Adapter|Microsoft Bluetooth|Enumerator'} | Select-Object FriendlyName,Status,InstanceId; if($x){$x|ConvertTo-Json -Compress}else{'[]'}"#;
+    let out = Command::new("powershell.exe")
+        .args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",script])
+        .output().map_err(|e| format!("BLUETOOTH_ENUMERATION_FAILED: {e}"))?;
+    if !out.status.success() { return Err("BLUETOOTH_ENUMERATION_FAILED".into()); }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() { return Ok(Vec::new()); }
+    let raw: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!([]));
+    let rows = if raw.is_array() { raw } else { json!([raw]) };
+    Ok(rows.as_array().unwrap().iter().map(|x| json!({
+        "name": x["FriendlyName"].as_str().unwrap_or("Bluetooth device"),
+        "status": x["Status"].as_str().unwrap_or("Unknown"),
+        "instanceId": x["InstanceId"].as_str().unwrap_or(""),
+        "connection": "bluetooth-windows",
+        "paired": true,
+        "online": x["Status"].as_str().unwrap_or("").eq_ignore_ascii_case("OK")
+    })).collect())
+}
+
 #[tauri::command]
 pub fn print_thermal(w: WebviewWindow, s: State<Mutex<AppState>>, printer: String, data: Vec<u8>) -> Result<Value, String> {
     let mut app = s.lock().map_err(|_| "PRINTER_LOCK_FAILED".to_string())?;
     ensure(&mut app, &w, Some(&["Admin","Owner","Manager","Cashier","Counter Person","Waiter","Kitchen Staff","Kitchen","Rider"]))?;
 
-    // Backward-compatible discovery channel. This avoids requiring another
-    // Tauri command registration and lets older renderer builds discover live
-    // Windows printers after updating only the native module.
     if printer == "__DISCOVER__" {
         #[cfg(windows)]
         unsafe { return Ok(json!({"ok":true,"printers":enumerate_printers()?})); }
         #[cfg(not(windows))]
         { return Ok(json!({"ok":true,"printers":[]})); }
+    }
+
+    // Native Windows Bluetooth inventory. This never invokes the browser
+    // Bluetooth permission picker: it reads already-paired Windows devices
+    // directly and lets the POS present them in its own built-in window.
+    if printer == "__BLUETOOTH_DISCOVER__" {
+        #[cfg(windows)]
+        { return Ok(json!({"ok":true,"devices":enumerate_bluetooth_devices()?})); }
+        #[cfg(not(windows))]
+        { return Ok(json!({"ok":true,"devices":[]})); }
     }
 
     if printer.trim().is_empty() { return Err("PRINTER_NAME_REQUIRED".into()); }
