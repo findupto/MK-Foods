@@ -6,6 +6,7 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const banking = read('src/renderer/banking.js');
 const production = read('src/renderer/production.js');
 const workflowUi = read('src/renderer/order-workflow.js');
+const printManager = read('src/renderer/print-manager.js');
 const tauri = read('src/renderer/tauri.js');
 const index = read('src/renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
@@ -18,6 +19,7 @@ function assert(ok, msg) { if (!ok) throw new Error(msg); }
 assert(index.includes('banking.js'), 'Banking screen is not loaded');
 assert(index.includes('production.js'), 'Production safeguards are not loaded');
 assert(index.includes('order-workflow.js'), 'Staged order workflow is not loaded');
+assert(index.includes('print-manager.js'), 'Print Manager is not loaded');
 assert(banking.includes('paymentMerchantId'), 'Bank merchant configuration missing');
 assert(banking.includes('paymentEnvironment'), 'Bank environment configuration missing');
 assert(production.includes('pending_verification'), 'Digital payments must not be auto-settled');
@@ -35,13 +37,18 @@ assert(production.includes('cashCollectedBy'), 'Cashier responsibility must be r
 assert(!production.includes('cardNumber') && !production.includes('cvv'), 'Card PAN/CVV must not be stored in renderer');
 assert(workflowUi.includes('collectedBy'), 'Order collector tracking missing');
 assert(workflowUi.includes('preparedBy'), 'Order preparer tracking missing');
-assert(workflowUi.includes('cookedBy'), 'Cook tracking missing');
+assert(workflowUi.includes('readyBy'), 'Kitchen ready tracking missing');
 assert(workflowUi.includes('cashCollectedBy'), 'Cash collector tracking missing');
 assert(workflowUi.includes('Shake Kitchen'), 'Shake kitchen routing missing');
 assert(workflowUi.includes('Biryani Kitchen'), 'Biryani kitchen routing missing');
 assert(workflowUi.includes('Fastfood Kitchen'), 'Fastfood kitchen routing missing');
-assert(workflowUi.includes('SALE RECEIPT'), 'Final sale receipt missing');
-assert(workflowUi.includes('customerHistorySearch'), 'Customer history search missing');
+assert(workflowUi.includes('assignments'), 'Per-kitchen assignment tracking missing');
+assert(workflowUi.includes('showOrderTracking'), 'Order tracking UI missing');
+assert(workflowUi.includes('queueReceipt'), 'Workflow must queue receipts instead of opening print windows');
+assert(!workflowUi.includes("window.open('','_blank'"), 'Order workflow must not open receipt popups');
+assert(printManager.includes('window.print()'), 'Print Manager must retain the system print action');
+assert(printManager.includes('queueOrderForPrint'), 'Print Manager queue bridge missing');
+assert(!printManager.includes("window.open('','_blank'"), 'Print Manager must not open receipt popups');
 assert(tauri.includes('discoverPrinters'), 'Printer discovery bridge missing');
 assert(tauri.includes('connectPrinter'), 'Printer connection bridge missing');
 assert(pkg.version === '2.0.0', 'Package version must match Tauri application version');
@@ -57,4 +64,4 @@ assert(windowsPowerShell.includes('Try-BatchMsvc'), 'PowerShell build must autom
 assert(windowsPowerShell.includes('aarch64-pc-windows-msvc'), 'Windows build must keep ARM64 target support');
 assert(windowsPowerShell.includes('i686-pc-windows-msvc'), 'Windows build must keep x86 target support');
 
-console.log('Production safety, staged workflow, and Windows build checks passed.');
+console.log('Production safety, staged workflow, non-popup printing, and Windows build checks passed.');
