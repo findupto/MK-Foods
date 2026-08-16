@@ -1,51 +1,194 @@
 (() => {
   'use strict';
-  const KEY='mkfoods.order.workflow.v1';
-  const load=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'{}')}catch{return {}}};
-  const save=x=>localStorage.setItem(KEY,JSON.stringify(x));
-  const state=Object.assign({schema:1,orders:{}},load());
-  const now=()=>new Date().toISOString();
-  const escW=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const user=()=>window.session?.username||'system';
-  const staff=()=>((db&&db.staff)||[]).filter(s=>s.active!==false);
-  const kitchens=['Shake Kitchen','Biryani Kitchen','Fastfood Kitchen'];
-  const kitchenFor=item=>{const c=String(item?.category||'').toLowerCase(),n=String(item?.name||'').toLowerCase();if(/shake|drink|beverage|juice|lassi|cold/.test(c+' '+n))return'Shake Kitchen';if(/biryani|rice|pulao|karahi/.test(c+' '+n))return'Biryani Kitchen';return'Fastfood Kitchen'};
-  const record=(id,patch={})=>{const w=state.orders[id]||{orderId:id,createdAt:now(),events:[]};Object.assign(w,patch);state.orders[id]=w;save();return w};
-  const event=(id,action,data={})=>{const w=record(id);w.events.push({at:now(),action,user:user(),...data});save();return w};
-  const get=id=>state.orders[id]||null;
-  const order=id=>(db.orders||[]).find(o=>o.id===id);
-  const printDoc=(title,body)=>{const win=window.open('','_blank','width=420,height=700');if(!win){alert('Allow pop-ups to print receipts.');return}win.document.write(`<html><head><title>${escW(title)}</title><style>body{font-family:Arial,sans-serif;width:300px;margin:20px auto;font-size:13px}h2{text-align:center}hr{border:0;border-top:1px dashed #000}.row{display:flex;justify-content:space-between;gap:10px;margin:5px 0}.small{font-size:11px}</style></head><body>${body}</body></html>`);win.document.close();win.focus();setTimeout(()=>win.print(),150)};
-  const receipt=(o,type)=>{const rows=(o.items||[]).map(i=>`<div class="row"><span>${escW(i.qty)} × ${escW(i.name)}</span><span>${money(Number(i.price)*Number(i.qty))}</span></div>`).join('');const customer=o.customerName||'Walk-in';const head=`<h2>MK FOODS POS</h2><div>${escW(type)}</div><div class="small">Order: ${escW(o.id)}<br>${escW(o.createdAt||now())}<br>Customer: ${escW(customer)}</div><hr>`;const total=`<hr><div class="row"><b>Total</b><b>${money(o.total)}</b></div>`;printDoc(`MK Foods - ${type}`,head+rows+total)};
-  const staffOptions=(selected='')=>`<option value="">Select staff</option>${staff().map(s=>`<option value="${escW(s.username)}" ${s.username===selected?'selected':''}>${escW(s.name||s.username)}</option>`).join('')}`;
-  const chooseStaff=(label,selected='')=>{const names=staff().map(s=>`${s.username} = ${s.name||s.username}`).join('\n');return prompt(`${label}\n${names}`,selected||user())||''};
-  window.mkOrderWorkflow={state,record,event,get,kitchens,kitchenFor,printDoc,receipt};
 
-  window.collectOrder=async()=>{
-    if(!Array.isArray(cart)||!cart.length)return alert('Add at least one item.');
-    const customerId=document.getElementById('workflowCustomer')?.value||'', customer=db.customers?.find(c=>c.id===customerId), type=document.getElementById('orderType')?.value||'Takeaway', address=document.getElementById('deliveryAddress')?.value||'';
-    if(type==='Delivery'&&!address.trim())return alert('Delivery address is required.');
-    for(const item of cart){const p=db.products?.find(x=>x.id===item.id);if(!p||Number(item.qty)<=0||Number(item.qty)>Number(p.stock||0))return alert(`Not enough stock for ${item.name}. Available: ${Number(p?.stock||0)}`)}
-    const subtotal=cart.reduce((s,x)=>s+Number(x.price||0)*Number(x.qty||0),0),discount=Math.min(Math.max(Number(document.getElementById('discount')?.value||0),0),subtotal),tax=Math.max(0,subtotal-discount)*Math.max(0,Number(db.settings?.tax||0))/100,deliveryFee=Math.max(0,Number(document.getElementById('deliveryFee')?.value||0)),total=subtotal-discount+tax+deliveryFee;
-    const id='ORD-'+Date.now()+'-'+Math.random().toString(36).slice(2,6), collectedBy=user();
-    const orderData={id,createdAt:now(),items:cart.map(({id,name,price,qty,category})=>({id,name,price,qty,category})),subtotal,discount,tax,deliveryFee,total,payment:'Cash',paymentStatus:'unpaid',orderType:type,address,customerId,customerName:customer?.name||'',status:'new',workflowStatus:'collected',collectedBy,createdBy:collectedBy,counterId:document.getElementById('counterId')?.value||''};
-    const r=await api(window.mkFoods.createOrder,orderData);if(r?.ok===false){handleAuthError(r);return}
-    record(id,{orderId:id,stage:'collected',collectedBy,customerId,customerName:customer?.name||'',kitchens:[...new Set(orderData.items.map(kitchenFor))],events:[]});event(id,'ORDER_COLLECTED',{collectedBy,customerId,customerName:customer?.name||''});receipt(orderData,'Order Collection Receipt');cart=[];await load();go('orderflow');
+  const KEY = 'mkfoods.order.workflow.v2';
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (_) { return {}; } };
+  const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+  const state = Object.assign({ schema: 2, orders: {} }, load());
+  const now = () => new Date().toISOString();
+  const escW = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  const currentUser = () => window.session?.username || 'system';
+  const staff = () => ((db && db.staff) || []).filter(x => x.active !== false);
+  const kitchens = ['Fastfood Kitchen', 'Biryani Kitchen', 'Shake Kitchen'];
+  const kitchenFor = item => {
+    const v = `${item?.category || ''} ${item?.name || ''}`.toLowerCase();
+    if (/shake|drink|beverage|juice|lassi|cold/.test(v)) return 'Shake Kitchen';
+    if (/biryani|rice|pulao|karahi/.test(v)) return 'Biryani Kitchen';
+    return 'Fastfood Kitchen';
+  };
+  const order = id => (db.orders || []).find(x => x.id === id);
+  const get = id => state.orders[id] || null;
+  const ensure = (id) => {
+    if (!state.orders[id]) state.orders[id] = { orderId:id, stage:'collected', events:[], assignments:{}, createdAt:now() };
+    return state.orders[id];
+  };
+  const event = (id, action, data = {}) => {
+    const w = ensure(id);
+    w.events.push({ at:now(), action, user:currentUser(), ...data });
+    save();
+    return w;
+  };
+  const stage = (id, value) => { ensure(id).stage = value; save(); };
+
+  function notify(message, kind = 'info') {
+    let box = document.getElementById('workflowToast');
+    if (!box) {
+      box = document.createElement('div'); box.id = 'workflowToast'; box.className = 'workflow-toast'; document.body.appendChild(box);
+    }
+    box.className = `workflow-toast ${kind}`; box.textContent = message; box.hidden = false;
+    clearTimeout(box._timer); box._timer = setTimeout(() => { box.hidden = true; }, 3500);
+  }
+
+  function modal(title, body, buttons = []) {
+    let root = document.getElementById('workflowModal');
+    if (!root) { root = document.createElement('div'); root.id = 'workflowModal'; root.className = 'workflow-modal'; document.body.appendChild(root); }
+    root.innerHTML = `<div class="workflow-backdrop" data-close="1"></div><div class="workflow-dialog"><div class="workflow-dialog-head"><h2>${escW(title)}</h2><button class="mini" data-close="1">×</button></div><div class="workflow-dialog-body">${body}</div><div class="workflow-dialog-actions">${buttons.map((b,i)=>`<button class="btn ${b.secondary?'secondary':''}" data-action="${i}">${escW(b.label)}</button>`).join('')}</div></div>`;
+    root.hidden = false;
+    const close = () => { root.hidden = true; root.innerHTML = ''; };
+    root.querySelectorAll('[data-close]').forEach(x => x.onclick = close);
+    root.querySelectorAll('[data-action]').forEach(x => x.onclick = async () => { const b = buttons[Number(x.dataset.action)]; try { await b.run?.(root); } finally { if (b.close !== false) close(); } });
+    return { root, close };
+  }
+
+  function queueReceipt(o, type, items = o.items || []) {
+    const copy = { ...o, id: o.id, items, printDocumentType:type, printStatus:'queued', queuedAt:now() };
+    if (typeof window.queueOrderForPrint === 'function') {
+      window.queueOrderForPrint(copy);
+      notify(`${type} added to Print Manager`, 'success');
+    } else {
+      notify('Print Manager is not ready. Open Print Manager and try again.', 'error');
+    }
+  }
+
+  function assignKitchens(id) {
+    const o = order(id); if (!o) return;
+    const w = ensure(id);
+    const groups = {};
+    (o.items || []).forEach(item => { const k = kitchenFor(item); (groups[k] ||= []).push(item); });
+    Object.keys(groups).forEach(k => { if (!w.assignments[k]) w.assignments[k] = { status:'pending', items:groups[k].map(x => x.id) }; });
+    w.kitchens = Object.keys(groups); save();
+  }
+
+  function selectStaff(title, onDone) {
+    const options = staff().map(x => `<option value="${escW(x.username)}">${escW(x.name || x.username)}</option>`).join('');
+    modal(title, `<label class="field-label">Responsible staff<select id="workflowStaff" class="field"><option value="">Select staff...</option>${options}</select></label>`, [
+      { label:'Cancel', secondary:true },
+      { label:'Continue', run:root => { const v = root.querySelector('#workflowStaff')?.value; if (!v) { notify('Select a staff member first.', 'error'); return Promise.reject(new Error('staff')); } onDone(v); } }
+    ]);
+  }
+
+  window.collectOrder = async () => {
+    if (!Array.isArray(cart) || !cart.length) return notify('Add at least one item.', 'error');
+    const type = document.getElementById('orderType')?.value || 'Takeaway';
+    const address = document.getElementById('deliveryAddress')?.value || '';
+    if (type === 'Delivery' && !address.trim()) return notify('Delivery address is required.', 'error');
+    for (const item of cart) {
+      const p = db.products?.find(x => x.id === item.id);
+      if (!p || Number(item.qty) <= 0 || Number(item.qty) > Number(p.stock || 0)) return notify(`Stock unavailable: ${item.name}`, 'error');
+    }
+    const subtotal = cart.reduce((s,x) => s + Number(x.price||0) * Number(x.qty||0), 0);
+    const discount = Math.min(Math.max(Number(document.getElementById('discount')?.value || 0),0), subtotal);
+    const tax = Math.max(0, subtotal-discount) * Math.max(0, Number(db.settings?.tax||0)) / 100;
+    const deliveryFee = Math.max(0, Number(document.getElementById('deliveryFee')?.value || 0));
+    const total = subtotal - discount + tax + deliveryFee;
+    const customerId = document.getElementById('workflowCustomer')?.value || '';
+    const customer = db.customers?.find(x => x.id === customerId);
+    const id = `ORD-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    const user = currentUser();
+    const orderData = {
+      id, createdAt:now(), items:cart.map(({id,name,price,qty,category}) => ({id,name,price,qty,category})),
+      subtotal, discount, tax, deliveryFee, total, payment:'Cash', paymentStatus:'unpaid',
+      orderType:type, address, customerId, customerName:customer?.name || '', status:'new',
+      workflowStatus:'collected', collectedBy:user, createdBy:user,
+      counterId:document.getElementById('counterId')?.value || '', tableId:document.getElementById('tableId')?.value || ''
+    };
+    const r = await api(window.mkFoods.createOrder, orderData);
+    if (r?.ok === false) return handleAuthError(r);
+    state.orders[id] = { orderId:id, stage:'collected', collectedBy:user, events:[], assignments:{}, createdAt:orderData.createdAt };
+    assignKitchens(id); event(id,'ORDER_COLLECTED',{collectedBy:user, customerName:orderData.customerName});
+    cart = [];
+    await load();
+    go('orderflow');
+    notify(`Order ${id} collected. Review it in Order Flow.`,'success');
   };
 
-  window.forwardKitchen=async(id,kitchen)=>{const o=order(id);if(!o)return;const by=chooseStaff('Who is forwarding this order to the kitchen?');if(!by)return;const w=record(id,{stage:'kitchen',kitchen});event(id,'FORWARDED_TO_KITCHEN',{kitchen,forwardedBy:by});try{await window.mkFoods.orderStatus(id,'preparing')}catch{}receipt({...o,items:(o.items||[]).filter(i=>kitchenFor(i)===kitchen)},`${kitchen} Kitchen Receipt`);renderOrderFlow()};
-  window.markPrepared=async(id)=>{const by=chooseStaff('Who prepared this order?');if(!by)return;record(id,{preparedBy:by,stage:'cooking'});event(id,'PREPARED',{preparedBy:by});renderOrderFlow()};
-  window.markCooked=async(id)=>{const by=chooseStaff('Who cooked this order?');if(!by)return;record(id,{cookedBy:by,stage:'ready'});event(id,'COOKED',{cookedBy:by});try{await window.mkFoods.orderStatus(id,'ready')}catch{}renderOrderFlow()};
-  window.sendToCounter=async(id)=>{const by=chooseStaff('Who sent the ready order to the counter?');if(!by)return;record(id,{counterBy:by,stage:'counter',sentToCounterAt:now()});event(id,'READY_SENT_TO_COUNTER',{counterBy:by});renderOrderFlow()};
-  window.collectCash=async(id)=>{const o=order(id),w=get(id);if(!o||!w)return;const by=chooseStaff('Who collected the cash?',w.cashCollectedBy||user());if(!by)return;const entered=prompt(`Cash due: ${money(o.total)}\nEnter cash received:`,String(o.total));if(entered===null)return;const received=Number(entered);if(!Number.isFinite(received)||received<Number(o.total))return alert('Cash received is less than the total.');record(id,{cashCollectedBy:by,cashReceived:received,change:received-Number(o.total),stage:'completed',cashCollectedAt:now()});event(id,'CASH_COLLECTED',{cashCollectedBy:by,cashReceived:received,change:received-Number(o.total)});try{await window.mkFoods.orderStatus(id,'completed')}catch{}receipt({...o,payment:'Cash',paymentStatus:'settled'},'SALE RECEIPT');await load();renderOrderFlow()};
+  window.forwardKitchen = async (id, kitchen) => {
+    const o = order(id); if (!o) return;
+    selectStaff(`Forward ${id} to ${kitchen}`, async by => {
+      const w = ensure(id); assignKitchens(id); w.assignments[kitchen] = { ...(w.assignments[kitchen]||{}), status:'preparing', forwardedBy:by, forwardedAt:now() };
+      stage(id,'kitchen'); event(id,'FORWARDED_TO_KITCHEN',{kitchen, forwardedBy:by});
+      queueReceipt({ ...o, items:(o.items||[]).filter(i => kitchenFor(i) === kitchen) }, `${kitchen} Kitchen Ticket`);
+      renderOrderFlow();
+    });
+  };
 
-  window.renderOrderFlow=()=>{const v=document.getElementById('view');if(!v)return;const orders=(db.orders||[]).slice().reverse();const active=orders.filter(o=>!['completed','cancelled','paid'].includes(String(get(o.id)?.stage||o.workflowStatus)==='completed'?'completed':String(get(o.id)?.stage||o.workflowStatus||'')));const rows=orders.map(o=>{const w=get(o.id)||{},stage=w.stage||o.workflowStatus||o.status||'new',last=w.events?.at(-1);return `<div class="panel" style="margin-bottom:12px"><div class="row" style="display:flex;justify-content:space-between;gap:10px"><div><h2>${escW(o.id)}</h2><div class="muted">${escW(o.customerName||'Walk-in')} · ${escW(o.orderType||'Takeaway')} · ${money(o.total)}</div></div><b>${escW(stage.toUpperCase())}</b></div><div class="grid cards"><div class="card"><small>Collected By</small><strong>${escW(w.collectedBy||'-')}</strong></div><div class="card"><small>Kitchen</small><strong>${escW(w.kitchen||w.kitchens?.join(', ')||'-')}</strong></div><div class="card"><small>Prepared By</small><strong>${escW(w.preparedBy||'-')}</strong></div><div class="card"><small>Cooked By</small><strong>${escW(w.cookedBy||'-')}</strong></div><div class="card"><small>Counter</small><strong>${escW(w.counterBy||'-')}</strong></div><div class="card"><small>Cash Collected By</small><strong>${escW(w.cashCollectedBy||'-')}</strong></div></div><div class="detail-actions">${stage==='collected'?w.kitchens?.map(k=>`<button class="btn" onclick="forwardKitchen('${escW(o.id)}','${escW(k)}')">Forward to ${escW(k)}</button>`).join(''):''}${stage==='kitchen'?`<button class="btn" onclick="markPrepared('${escW(o.id)}')">Prepared</button>`:''}${stage==='cooking'?`<button class="btn" onclick="markCooked('${escW(o.id)}')">Cooked / Ready</button>`:''}${stage==='ready'?`<button class="btn" onclick="sendToCounter('${escW(o.id)}')">Send to Counter</button>`:''}${stage==='counter'?`<button class="btn" onclick="collectCash('${escW(o.id)}')">Collect Cash & Print Sale Receipt</button>`:''}<button class="btn secondary" onclick="showOrderTracking('${escW(o.id)}')">Track</button></div><div class="muted small">${last?escW(last.action)+' · '+escW(last.user)+' · '+escW(last.at):'No events'}</div></div>`}).join('');v.innerHTML=shell('Order Flow','Collect → Kitchen → Ready → Counter → Cash',`<div class="notice">Every stage records the responsible person and timestamp. Kitchen receipts print when an order is forwarded; the final sale receipt prints only after cash is collected.</div>${rows||'<div class="panel">No orders yet.</div>'}`)};
-  window.showOrderTracking=id=>{const o=order(id),w=get(id);if(!o||!w)return;openDetail(`Order Tracking · ${id}`,`<div class="detail-grid"><div class="detail-kv"><span>Customer</span><b>${escW(o.customerName||'Walk-in')}</b></div><div class="detail-kv"><span>Collected By</span><b>${escW(w.collectedBy||'-')}</b></div><div class="detail-kv"><span>Prepared By</span><b>${escW(w.preparedBy||'-')}</b></div><div class="detail-kv"><span>Cooked By</span><b>${escW(w.cookedBy||'-')}</b></div><div class="detail-kv"><span>Counter By</span><b>${escW(w.counterBy||'-')}</b></div><div class="detail-kv"><span>Cashier</span><b>${escW(w.cashCollectedBy||'-')}</b></div></div><hr>${(w.events||[]).map(e=>`<div class="row"><span>${escW(e.action)}</span><span>${escW(e.user)} · ${escW(e.at)}</span></div>`).join('')}`)};
+  window.markPrepared = (id, kitchen) => selectStaff(`Mark ${kitchen} prepared`, by => {
+    const w = ensure(id); w.assignments[kitchen] = { ...(w.assignments[kitchen]||{}), status:'prepared', preparedBy:by, preparedAt:now() };
+    event(id,'KITCHEN_PREPARED',{kitchen, preparedBy:by});
+    const all = (w.kitchens||[]).every(k => w.assignments[k]?.status === 'prepared' || w.assignments[k]?.status === 'ready');
+    if (all) stage(id,'ready'); else save(); renderOrderFlow();
+  });
 
-  const originalPos=views.pos;
-  views.pos=v=>{const products=db.products||[],cats=[...new Set(products.filter(p=>p.available).map(p=>p.category))],customers=db.customers||[];v.innerHTML=shell('Collect Order','Step 1 · customer search and order collection',`<div class="poslayout"><div class="panel"><div class="toolbar"><input id="productSearch" class="field" placeholder="Search menu..." oninput="renderPosProducts()"><select id="posCat" class="field" onchange="renderPosProducts()"><option value="">All categories</option>${cats.map(c=>`<option>${escW(c)}</option>`).join('')}</select></div><div id="posProducts" class="productgrid"></div></div><div class="panel cartpanel"><h2>Current Order</h2><div id="cartLines">${cart.map((x,i)=>`<div class="orderline"><span>${escW(x.name)} × ${x.qty}</span><span>${money(x.price*x.qty)} <button class="mini danger" onclick="removeItem(${i})">×</button></span></div>`).join('')||'<p class="muted">No items yet</p>'}</div><div class="formgrid"><label>Customer Search<select id="workflowCustomer" class="field"><option value="">Walk-in</option>${customers.map(c=>`<option value="${escW(c.id)}">${escW(c.name)}${c.phone?' · '+escW(c.phone):''}</option>`).join('')}</select></label><label>Type<select id="orderType" class="field"><option>Takeaway</option><option>Dine-in</option><option>Delivery</option><option>Drive-thru</option><option>Kiosk</option></select></label><label>Table<select id="tableId" class="field"><option value="">No table</option>${(db.tables||[]).map(t=>`<option value="${escW(t.id)}">${escW(t.name)}</option>`).join('')}</select></label><label>Counter<select id="counterId" class="field"><option value="">Not assigned</option>${(db.counters||[]).map(c=>`<option value="${escW(c.id)}">${escW(c.name)}</option>`).join('')}</select></label><label>Discount<input id="discount" class="field" type="number" min="0" value="0"></label><label>Delivery Fee<input id="deliveryFee" class="field" type="number" min="0" value="0"></label><label class="wide">Address<input id="deliveryAddress" class="field" placeholder="Delivery address"></label></div><div id="posTotals" class="grid cards" style="margin-top:12px"><div class="card"><small>Subtotal</small><strong>${money(cart.reduce((s,x)=>s+x.price*x.qty,0))}</strong></div><div class="card"><small>Discount</small><strong>${money(0)}</strong></div><div class="card"><small>Tax</small><strong>${money(0)}</strong></div><div class="card"><small>Total</small><strong>${money(cart.reduce((s,x)=>s+x.price*x.qty,0))}</strong></div></div><button class="btn widebtn" ${cart.length?'':'disabled'} onclick="collectOrder()">Collect Order & Print Receipt</button><button class="btn secondary widebtn" onclick="go('orderflow')">Open Order Flow</button></div></div>`);renderPosProducts()};
-  window.goOrderFlow=()=>go('orderflow');
-  views.orderflow=()=>renderOrderFlow();
-  const oldCustomers=views.customers;
-  views.customers=v=>{const customers=db.customers||[],orders=db.orders||[];v.innerHTML=shell('Customers & History','Search returning customers and previous orders',`<div class="panel"><div class="toolbar"><input id="customerHistorySearch" class="field" placeholder="Search name, phone, email..." oninput="renderCustomerHistory()"><button class="btn" onclick="addCustomer()">Add Customer</button></div><div id="customerHistory"></div></div>`);window.renderCustomerHistory=()=>{const q=(document.getElementById('customerHistorySearch')?.value||'').toLowerCase();const list=customers.filter(c=>!q||[c.name,c.phone,c.email].join(' ').toLowerCase().includes(q));document.getElementById('customerHistory').innerHTML=list.map(c=>{const os=orders.filter(o=>o.customerId===c.id||(!o.customerId&&o.customerName===c.name));return `<div class="panel" style="margin-top:10px"><h3>${escW(c.name)}</h3><div class="muted">${escW(c.phone||'')} · ${escW(c.email||'')}</div><p>${os.length} previous order(s) · ${money(os.reduce((s,o)=>s+Number(o.total||0),0))}</p>${os.slice(-10).reverse().map(o=>`<div class="row" style="display:flex;justify-content:space-between"><span>${escW(o.id)} · ${escW(o.createdAt)}</span><span>${money(o.total)} · ${escW(o.status)}</span></div>`).join('')}</div>`}).join('')||'<p class="muted">No matching customer.</p>'};renderCustomerHistory()};
-  document.addEventListener('DOMContentLoaded',()=>{const nav=document.getElementById('nav');if(nav&&!nav.querySelector('[data-view="orderflow"]')){const b=document.createElement('button');b.dataset.view='orderflow';b.textContent='Order Flow';nav.insertBefore(b,nav.querySelector('[data-view="kds"]')||null)}});
+  window.markReady = (id, kitchen) => selectStaff(`Mark ${kitchen} ready`, by => {
+    const w = ensure(id); w.assignments[kitchen] = { ...(w.assignments[kitchen]||{}), status:'ready', readyBy:by, readyAt:now() };
+    event(id,'KITCHEN_READY',{kitchen, readyBy:by});
+    if ((w.kitchens||[]).every(k => w.assignments[k]?.status === 'ready')) stage(id,'ready'); else save(); renderOrderFlow();
+  });
+
+  window.sendToCounter = id => selectStaff('Send order to counter', by => {
+    stage(id,'counter'); const w=ensure(id); w.counterBy=by; w.sentToCounterAt=now(); event(id,'READY_SENT_TO_COUNTER',{counterBy:by}); renderOrderFlow();
+  });
+
+  window.collectCash = id => {
+    const o = order(id); if (!o) return;
+    const due = Number(o.total || 0);
+    const staffOptions = staff().map(x => `<option value="${escW(x.username)}">${escW(x.name||x.username)}</option>`).join('');
+    modal(`Settle ${id}`, `<div class="payment-summary"><span>Amount due</span><strong>${money(due)}</strong></div><div class="formgrid"><label>Cashier<select id="cashier" class="field"><option value="">Select cashier...</option>${staffOptions}</select></label><label>Cash received<input id="cashReceived" class="field" type="number" min="${due}" step="0.01" value="${due}"></label></div><div id="changePreview" class="payment-change">Change: ${money(0)}</div>`, [
+      {label:'Cancel',secondary:true},
+      {label:'Complete & Queue Receipt',run:async root=>{
+        const cashier=root.querySelector('#cashier')?.value, received=Number(root.querySelector('#cashReceived')?.value||0);
+        if(!cashier || !Number.isFinite(received) || received < due){ notify('Select cashier and enter enough cash.','error'); return Promise.reject(new Error('payment')); }
+        const r=await api(window.mkFoods.orderStatus,id,'completed'); if(r?.ok===false){handleAuthError(r);return Promise.reject(new Error('status'));}
+        const w=ensure(id); w.cashCollectedBy=cashier; w.cashReceived=received; w.change=received-due; w.cashCollectedAt=now(); stage(id,'completed'); event(id,'CASH_COLLECTED',{cashCollectedBy:cashier,cashReceived:received,change:received-due});
+        queueReceipt({...o,payment:'Cash',paymentStatus:'settled'},'Sale Receipt'); await load(); renderOrderFlow();
+      }}
+    ]);
+    setTimeout(()=>{const el=document.getElementById('cashReceived'),out=document.getElementById('changePreview'); if(el&&out)el.oninput=()=>out.textContent=`Change: ${money(Math.max(0,Number(el.value||0)-due))}`;},0);
+  };
+
+  window.showOrderTracking = id => {
+    const o=order(id), w=get(id); if(!o||!w)return;
+    const events=(w.events||[]).map(e=>`<div class="timeline-item"><span class="timeline-dot"></span><div><b>${escW(e.action.replaceAll('_',' '))}</b><div class="muted">${escW(e.user)} · ${new Date(e.at).toLocaleString()}</div></div></div>`).join('');
+    const kitchensHtml=(w.kitchens||[]).map(k=>{const a=w.assignments?.[k]||{};return `<div class="tracking-kitchen"><b>${escW(k)}</b><span class="tag">${escW(a.status||'pending')}</span><small>Forwarded: ${escW(a.forwardedBy||'-')} · Prepared: ${escW(a.preparedBy||'-')} · Ready: ${escW(a.readyBy||'-')}</small></div>`}).join('');
+    openDetail(`Order Tracking · ${id}`, `<div class="tracking-hero"><div><span class="muted">Customer</span><h2>${escW(o.customerName||'Walk-in')}</h2></div><div class="tracking-total">${money(o.total)}</div></div><div class="detail-grid"><div class="detail-kv"><span>Stage</span><b>${escW(w.stage||o.status)}</b></div><div class="detail-kv"><span>Collected</span><b>${escW(w.collectedBy||'-')}</b></div><div class="detail-kv"><span>Counter</span><b>${escW(w.counterBy||'-')}</b></div><div class="detail-kv"><span>Cashier</span><b>${escW(w.cashCollectedBy||'-')}</b></div></div><h3>Kitchen Tracking</h3><div class="tracking-kitchens">${kitchensHtml||'<span class="muted">No kitchen assignments.</span>'}</div><h3>Timeline</h3><div class="workflow-timeline">${events||'<span class="muted">No events recorded.</span>'}</div>`);
+  };
+
+  window.renderOrderFlow = () => {
+    const v=document.getElementById('view'); if(!v)return;
+    const orders=(db.orders||[]).slice().reverse();
+    const cards=orders.map(o=>{
+      const w=ensure(o.id); if(!w.kitchens?.length)assignKitchens(o.id);
+      const current=get(o.id)||w, stageName=current.stage||o.status||'new';
+      const kitchenCards=(current.kitchens||[]).map(k=>{const a=current.assignments?.[k]||{};let action='';
+        if(a.status==='pending') action=`<button class="mini" onclick="forwardKitchen('${escW(o.id)}','${escW(k)}')">Send to ${escW(k)}</button>`;
+        else if(a.status==='preparing') action=`<button class="mini" onclick="markPrepared('${escW(o.id)}','${escW(k)}')">Prepared</button>`;
+        else if(a.status==='prepared') action=`<button class="mini" onclick="markReady('${escW(o.id)}','${escW(k)}')">Ready</button>`;
+        return `<div class="workflow-kitchen-card"><div><b>${escW(k)}</b><span class="tag">${escW(a.status||'pending')}</span></div><small>${(a.items||[]).length} item group</small>${action}</div>`;
+      }).join('');
+      const counter=stageName==='ready'?`<button class="btn" onclick="sendToCounter('${escW(o.id)}')">Send to Counter</button>`:'';
+      const payment=stageName==='counter'?`<button class="btn" onclick="collectCash('${escW(o.id)}')">Settle Payment</button>`:'';
+      const track=`<button class="btn secondary" onclick="showOrderTracking('${escW(o.id)}')">Track Order</button>`;
+      return `<article class="workflow-order-card"><div class="workflow-order-head"><div><div class="order-number">${escW(o.id)}</div><div class="muted">${escW(o.customerName||'Walk-in')} · ${escW(o.orderType||'Takeaway')} · ${new Date(o.createdAt||Date.now()).toLocaleString()}</div></div><div class="workflow-stage ${escW(stageName)}">${escW(stageName)}</div></div><div class="workflow-items">${(o.items||[]).map(i=>`<div><span>${escW(i.qty)} × ${escW(i.name)}</span><b>${money(Number(i.price)*Number(i.qty))}</b></div>`).join('')}</div><div class="workflow-kitchens">${kitchenCards}</div><div class="workflow-actions">${counter}${payment}${track}</div></article>`;
+    }).join('');
+    v.innerHTML=shell('Order Flow','Live control board · Collection → Kitchens → Ready → Counter → Payment', `<div class="workflow-board"><div class="workflow-board-head"><div><h2>Live Orders</h2><p class="muted">Each kitchen has its own status. Every action is tracked with staff and time.</p></div><div class="actions"><button class="btn secondary" onclick="go('pos')">New Order</button><button class="btn secondary" onclick="go('printmanager')">Print Manager</button></div></div>${cards||'<div class="panel empty-state"><h2>No orders</h2><p class="muted">Collected orders will appear here.</p></div>'}</div>`);
+  };
+
+  const oldPos = views.pos;
+  views.pos = v => {
+    const products=db.products||[], cats=[...new Set(products.filter(p=>p.available).map(p=>p.category))], customers=db.customers||[];
+    v.innerHTML=shell('Collect Order','Fast order entry with customer, table, counter and delivery details', `<div class="poslayout"><div class="panel"><div class="toolbar"><input id="productSearch" class="field" placeholder="Search menu..." oninput="renderPosProducts()"><select id="posCat" class="field" onchange="renderPosProducts()"><option value="">All categories</option>${cats.map(c=>`<option>${escW(c)}</option>`).join('')}</select></div><div id="posProducts" class="productgrid"></div></div><div class="panel cartpanel"><div class="cart-header"><div><h2>Current Order</h2><span class="muted">Add items, then collect.</span></div><button class="mini danger" onclick="cart=[];render()">Clear</button></div><div id="cartLines">${cart.map((x,i)=>`<div class="orderline"><div><b>${escW(x.name)}</b><small>${money(x.price)} each</small></div><div class="line-controls"><button class="mini" onclick="cart[${i}].qty=Math.max(1,cart[${i}].qty-1);render()">−</button><b>${x.qty}</b><button class="mini" onclick="add('${escW(x.id)}')">+</button><button class="mini danger" onclick="removeItem(${i})">×</button></div></div>`).join('')||'<div class="empty-state"><b>No items yet</b><span class="muted">Select menu items on the left.</span></div>'}</div><div class="formgrid"><label>Customer<select id="workflowCustomer" class="field"><option value="">Walk-in</option>${customers.map(c=>`<option value="${escW(c.id)}">${escW(c.name)}${c.phone?' · '+escW(c.phone):''}</option>`).join('')}</select></label><label>Order Type<select id="orderType" class="field"><option>Takeaway</option><option>Dine-in</option><option>Delivery</option><option>Drive-thru</option><option>Kiosk</option></select></label><label>Table<select id="tableId" class="field"><option value="">No table</option>${(db.tables||[]).map(t=>`<option value="${escW(t.id)}">${escW(t.name)}</option>`).join('')}</select></label><label>Counter<select id="counterId" class="field"><option value="">Not assigned</option>${(db.counters||[]).map(c=>`<option value="${escW(c.id)}">${escW(c.name)}</option>`).join('')}</select></label><label>Discount<input id="discount" class="field" type="number" min="0" value="0"></label><label>Delivery Fee<input id="deliveryFee" class="field" type="number" min="0" value="0"></label><label class="wide">Delivery Address<input id="deliveryAddress" class="field" placeholder="Required for delivery"></label></div><div class="order-total-bar"><span>Total</span><strong>${money(cart.reduce((s,x)=>s+Number(x.price)*Number(x.qty),0))}</strong></div><button class="btn widebtn" ${cart.length?'':'disabled'} onclick="collectOrder()">Collect Order</button><button class="btn secondary widebtn" onclick="go('orderflow')">Open Live Order Flow</button></div></div>`);
+    renderPosProducts();
+  };
+
+  views.orderflow = () => renderOrderFlow();
 })();
