@@ -1,18 +1,8 @@
-(() => {
-  'use strict';
-  const originalComplete = window.posCoreComplete;
-  const stripPercent = () => { const t=document.getElementById('posCoreDiscountType'); if(t){ [...t.options].filter(o=>o.value==='percent').forEach(o=>o.remove()); t.value='fixed'; } };
-  const normalize = () => {
-    const box = document.getElementById('posCorePayments');
-    if (!box) return;
-    stripPercent();
-    if (!box.querySelector('.payment-row')) {
-      const total = Number(document.getElementById('posCoreTotal')?.textContent?.replace(/[^0-9.-]/g,'') || 0);
-      box.innerHTML = `<div class="payment-row"><select class="field" data-pay-method="0"><option selected>Cash</option><option>Card</option><option>Online</option><option>COD</option><option>Bank Transfer</option><option>Customer Credit</option><option>Advance</option></select><input class="field" data-pay-amount="0" type="number" min="0" step=".01" value="${total}"><button class="mini danger" onclick="posCoreRemovePayment(0)">×</button></div>`;
-    }
-  };
-  const oldRender = window.render;
-  window.render = (...args) => { const r = oldRender?.(...args); setTimeout(normalize, 0); return r; };
-  window.posCoreComplete = async (...args) => { stripPercent(); normalize(); return originalComplete?.(...args); };
-  setTimeout(normalize, 0);
+(()=>{'use strict';
+const oldRender=window.render;const moneySafe=n=>typeof money==='function'?money(n):`Rs. ${Number(n||0).toFixed(2)}`;
+function calc(){const items=window.cart||[],sub=items.reduce((a,x)=>a+Number(x.price||0)*Number(x.qty||0),0),type=document.getElementById('posCoreDiscountType')?.value||'fixed',raw=Number(document.getElementById('posCoreDiscount')?.value||0),discount=type==='percent'?Math.min(sub,sub*Math.max(0,Math.min(100,raw))/100):Math.min(sub,Math.max(0,raw)),fee=Number(document.getElementById('posCoreDeliveryFee')?.value||0),tax=Math.max(0,sub-discount)*Number(db.settings?.tax||0)/100,total=Math.max(0,sub-discount+tax+fee),el=document.getElementById('posCoreTotal');if(el)el.textContent=moneySafe(total);return{sub,discount,tax,fee,total}}
+function bind(){const type=document.getElementById('posCoreDiscountType'),input=document.getElementById('posCoreDiscount');if(type&&!type.dataset.bound){type.dataset.bound='1';type.onchange=calc}if(input&&!input.dataset.bound){input.dataset.bound='1';input.oninput=calc}const box=document.getElementById('posCorePayments');if(box&&!box.dataset.bound){box.dataset.bound='1';box.addEventListener('input',()=>{const rows=[...box.querySelectorAll('.payment-row')],paid=rows.reduce((a,r)=>a+Number(r.querySelector('input')?.value||0),0),t=calc().total;let s=box.parentElement.querySelector('.payment-summary');if(s)s.innerHTML=`<span>Paid ${moneySafe(paid)}</span><b>${paid<t?'Due '+moneySafe(t-paid):'Change '+moneySafe(paid-t)}</b>`})}}
+oldRender&&(window.render=(...a)=>{const r=oldRender(...a);setTimeout(bind,0);return r});
+const original=window.posCoreComplete;window.posCoreComplete=async()=>{bind();const t=calc(),rows=[...document.querySelectorAll('#posCorePayments .payment-row')];if(!rows.length)return original?.();const payments=rows.map((r,i)=>({method:r.querySelector(`[data-pay-method="${i}"]`)?.value||'Cash',amount:Number(r.querySelector(`[data-pay-amount="${i}"]`)?.value||0)})),paid=payments.reduce((a,p)=>a+p.amount,0);if(paid<t.total){const customer=document.getElementById('posCoreCustomer')?.value?.trim();if(!customer)return alert(`Payment short by ${moneySafe(t.total-paid)}. Select a customer to record the remainder as Customer Credit.`);payments.push({method:'Customer Credit',amount:t.total-paid});const box=document.getElementById('posCorePayments');if(box){const i=payments.length-1;box.insertAdjacentHTML('beforeend',`<div class="payment-row"><select class="field" data-pay-method="${i}"><option>Cash</option><option>Card</option><option>Online</option><option>COD</option><option>Bank Transfer</option><option selected>Customer Credit</option><option>Advance</option></select><input class="field" data-pay-amount="${i}" type="number" min="0" step=".01" value="${(t.total-paid).toFixed(2)}"><button class="mini danger" onclick="posCoreRemovePayment(${i})">×</button></div>`);}}
+if(document.getElementById('posCoreDiscountType')?.value==='percent'){const d=document.getElementById('posCoreDiscount');if(d){d.value=t.discount;const ty=document.getElementById('posCoreDiscountType');if(ty)ty.value='fixed'}}return original?.()};setTimeout(bind,100);
 })();
