@@ -7,6 +7,7 @@ const banking = read('src/renderer/banking.js');
 const production = read('src/renderer/production.js');
 const workflowUi = read('src/renderer/order-workflow.js');
 const printManager = read('src/renderer/print-manager.js');
+const printers = read('src/renderer/printers.js');
 const tauri = read('src/renderer/tauri.js');
 const index = read('src/renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
@@ -15,6 +16,7 @@ const cargoText = read('src-tauri/Cargo.toml');
 const workflow = read('.github/workflows/build-windows.yml');
 const windowsBuild = read('build-windows.bat');
 const windowsPowerShell = read('build-windows.ps1');
+const rustPrinter = read('src-tauri/src/printer.rs');
 
 function assert(ok, msg) { if (!ok) throw new Error(msg); }
 
@@ -53,6 +55,13 @@ assert(printManager.includes('queueOrderForPrint'), 'Print Manager queue bridge 
 assert(!printManager.includes("window.open('','_blank'"), 'Print Manager must not open receipt popups');
 assert(tauri.includes('discoverPrinters'), 'Printer discovery bridge missing');
 assert(tauri.includes('connectPrinter'), 'Printer connection bridge missing');
+assert(printers.includes('Every discovered Bluetooth device is selectable'), 'Bluetooth devices must remain clickable');
+assert(printers.includes('Direct Bluetooth'), 'Bluetooth direct transport fallback missing');
+assert(printers.includes('Windows queue'), 'Windows printer queue fallback missing');
+assert(printers.includes('findWindowsFallback'), 'Windows queue matching fallback missing');
+assert(rustPrinter.includes('Get-CimInstance Win32_PnPEntity'), 'Bluetooth PnP fallback discovery missing');
+assert(rustPrinter.includes('BTHENUM*'), 'BTHENUM device discovery missing');
+assert(rustPrinter.includes('bluetooth_mac_from_instance'), 'Bluetooth MAC extraction missing');
 assert(pkg.version === tauriConfig.version, 'Package version must match Tauri application version');
 assert(pkg.version === '2.2.0', 'Application release version must be 2.2.0');
 assert(cargoText.match(/version\s*=\s*"([^"]+)"/)[1] === pkg.version, 'Cargo package version must match application version');
@@ -68,4 +77,4 @@ assert(windowsPowerShell.includes('Try-BatchMsvc'), 'PowerShell build must autom
 assert(windowsPowerShell.includes('aarch64-pc-windows-msvc'), 'Windows build must keep ARM64 target support');
 assert(windowsPowerShell.includes('i686-pc-windows-msvc'), 'Windows build must keep x86 target support');
 
-console.log('Production safety, version consistency, staged workflow, non-popup printing, and Windows build checks passed.');
+console.log('Production safety, printer connectivity, version consistency, staged workflow, non-popup printing, and Windows build checks passed.');
