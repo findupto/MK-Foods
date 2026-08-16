@@ -28,7 +28,10 @@ assert(printers.includes('discoverBluetooth'), 'Native Bluetooth discovery bridg
 assert(!printers.includes('navigator.bluetooth'), 'Browser Bluetooth picker must not be used');
 assert(!printers.includes('navigator.serial'), 'Browser serial picker must not be used');
 assert(printerNative.includes('__BLUETOOTH_DISCOVER__'), 'Native Bluetooth discovery command must exist');
-assert(printerNative.includes('Get-PnpDevice -Class Bluetooth'), 'Windows Bluetooth inventory must be native');
+// Keep this test implementation-agnostic: Windows exposes paired Bluetooth devices
+// through several native PnP surfaces depending on Windows/build/driver version.
+assert(printerNative.includes('Get-PnpDevice') && printerNative.includes('BTHENUM*'), 'Windows Bluetooth inventory must be native');
+assert(printerNative.includes('Win32_PnPEntity'), 'Windows PnP fallback inventory must exist');
 assert(printerNative.includes('EnumPrintersW'), 'Windows printer enumeration must use the spooler');
 assert(printerNative.includes('WritePrinter'), 'Windows thermal printing must use RAW spooler output');
 assert(printManager.includes('window.printReceipt = order => { queue(order); go(\'printmanager\'); }'), 'Receipt printing must queue into Print Manager');
