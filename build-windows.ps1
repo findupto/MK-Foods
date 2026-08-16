@@ -36,7 +36,7 @@ function Find-VisualStudio {
             $p = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Select-Object -First 1)
             if ($p) { $p = ([string]$p).Trim() }
             if ($p -and (Test-Path -LiteralPath (Join-Path $p 'VC\Tools\MSVC'))) { return $p }
-        } catch { Write-Host "vswhere lookup failed; trying filesystem discovery." -ForegroundColor DarkYellow }
+        } catch { Write-Host 'vswhere lookup failed; trying filesystem discovery.' -ForegroundColor DarkYellow }
     }
 
     $roots = @()
@@ -129,10 +129,9 @@ function Import-CmdEnvironment([string]$BatchFile, [string]$Arch) {
     $cmd = Join-Path $env:TEMP ("mk-foods-vcvars-{0}.cmd" -f ([guid]::NewGuid().ToString('N')))
     $envFile = "$cmd.env"
     try {
-        $escaped = $BatchFile.Replace('"','\"')
         @(
             '@echo off',
-            "call `"$escaped`" $Arch >nul 2>&1",
+            "call `"$BatchFile`" $Arch >nul 2>&1",
             'if errorlevel 1 exit /b 1',
             "set > `"$envFile`"",
             'exit /b 0'
@@ -177,6 +176,19 @@ function Activate-Msvc([string]$VsInstall, [string]$CompilerArch, [string]$HostA
     }
 }
 
+function Ensure-RustOnPath([string]$RustBin, [string]$CargoPath, [string]$RustcPath, [string]$RustupPath) {
+    $parts = @($RustBin)
+    if ($CargoPath) { $parts += (Split-Path -Parent $CargoPath) }
+    if ($RustcPath) { $parts += (Split-Path -Parent $RustcPath) }
+    if ($RustupPath) { $parts += (Split-Path -Parent $RustupPath) }
+    $existing = @($env:PATH -split ';') | Where-Object { $_ }
+    $env:PATH = (($parts + $existing) | Select-Object -Unique) -join ';'
+    $cargoCmd = Get-Command cargo.exe -ErrorAction SilentlyContinue
+    if (-not $cargoCmd) { throw 'Cargo is not available on PATH after MSVC environment activation.' }
+    $env:CARGO = $cargoCmd.Source
+    Write-Host "Cargo available: $($cargoCmd.Source)" -ForegroundColor Green
+}
+
 Write-Host '================================================================' -ForegroundColor Yellow
 Write-Host '      MK FOODS POS - WINDOWS INSTALLER BUILD' -ForegroundColor Yellow
 Write-Host '     x64 + x86 + ARM64 / NSIS / GUI INSTALLER' -ForegroundColor Yellow
@@ -184,11 +196,16 @@ Write-Host '================================================================' -F
 
 try {
     Write-Step '[1/9] Checking Node.js / npm'
-    $node=Get-Command node.exe -ErrorAction Stop; $npm=Get-Command npm.cmd -ErrorAction Stop
+    $node=Get-Command node.exe -ErrorAction Stop
+    $npm=Get-Command npm.cmd -ErrorAction Stop
+    $npx=Get-Command npx.cmd -ErrorAction Stop
     & $node.Source --version; & $npm.Source --version
 
     Write-Step '[2/9] Checking Rust / Cargo'
-    $cargo=Get-Command cargo.exe -ErrorAction Stop; $rustc=Get-Command rustc.exe -ErrorAction Stop; $rustup=Get-Command rustup.exe -ErrorAction Stop
+    $cargo=Get-Command cargo.exe -ErrorAction Stop
+    $rustc=Get-Command rustc.exe -ErrorAction Stop
+    $rustup=Get-Command rustup.exe -ErrorAction Stop
+    $rustBin = Split-Path -Parent $cargo.Source
     & $cargo.Source --version; & $rustc.Source --version; & $rustup.Source --version
 
     Write-Step '[3/9] Detecting Visual Studio C++ MSVC tools'
@@ -197,6 +214,7 @@ try {
     Write-Host "MSVC toolset root: $(Join-Path $vsInstall 'VC\Tools\MSVC')"
     Write-Host 'Primary method: direct MSVC + Windows SDK; automatic batch fallback enabled'
     Activate-Msvc $vsInstall 'x64' 'Hostx64' 'x64'
+    Ensure-RustOnPath $rustBin $cargo.Source $rustc.Source $rustup.Source
 
     Write-Step '[4/9] Installing / repairing npm dependencies'
     Invoke-Native $npm.Source @('install','--include=dev')
@@ -205,9 +223,10 @@ try {
     Invoke-Native $npm.Source @('test')
 
     Write-Step '[6/9] Checking Tauri CLI and Windows targets'
-    $npx=Get-Command npx.cmd -ErrorAction Stop
     Invoke-Native $npx.Source @('--no-install','tauri','--version')
     foreach ($t in $Targets) { Invoke-Native $rustup.Source @('target','add',$t.Target) }
+    Ensure-RustOnPath $rustBin $cargo.Source $rustc.Source $rustup.Source
+    Invoke-Native $cargo.Source @('--version')
 
     Write-Step '[7/9] Preparing application icon'
     $icons=Join-Path $Root 'src-tauri\icons'; New-Item -ItemType Directory -Force -Path $icons | Out-Null
@@ -217,6 +236,7 @@ try {
     if (-not (Test-Path -LiteralPath $ico)) { throw "Tauri did not create $ico" }
 
     Write-Step '[8/9] Validating Tauri project'
+    Ensure-RustOnPath $rustBin $cargo.Source $rustc.Source $rustup.Source
     Invoke-Native $cargo.Source @('metadata','--no-deps','--format-version','1','--manifest-path',(Join-Path $Root 'src-tauri\Cargo.toml'))
 
     Write-Step '[9/9] Building NSIS installers for x64, x86 and ARM64'
@@ -227,8 +247,10 @@ try {
         Write-Host "Building $($t.Name) - $($t.Target)" -ForegroundColor Yellow
         Write-Host "---------------------------------------------------------------" -ForegroundColor DarkGray
         Activate-Msvc $vsInstall $t.CompilerArch $t.HostArch $t.BatchArch
+        Ensure-RustOnPath $rustBin $cargo.Source $rustc.Source $rustup.Source
         $bundle=Join-Path $Root "src-tauri\target\$($t.Target)\release\bundle\nsis"
         if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }
+        Write-Host "Using Cargo: $env:CARGO" -ForegroundColor DarkGray
         Invoke-Native $npx.Source @('--no-install','tauri','build','--bundles','nsis','--target',$t.Target)
         $installer=Get-ChildItem -LiteralPath $bundle -Filter '*-setup.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $installer) { throw "No NSIS installer was produced for $($t.Name). Expected: $bundle" }
