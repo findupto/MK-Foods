@@ -5,9 +5,9 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 $Out = Join-Path $Root 'dist'
 $Targets = @(
-    @{ Name='x64'; Target='x86_64-pc-windows-msvc'; CompilerArch='x64'; Host='Hostx64' },
-    @{ Name='x86'; Target='i686-pc-windows-msvc'; CompilerArch='x86'; Host='Hostx64' },
-    @{ Name='ARM64'; Target='aarch64-pc-windows-msvc'; CompilerArch='arm64'; Host='Hostx64' }
+    @{ Name='x64'; Target='x86_64-pc-windows-msvc'; CompilerArch='x64'; HostArch='Hostx64'; BatchArch='x64' },
+    @{ Name='x86'; Target='i686-pc-windows-msvc'; CompilerArch='x86'; HostArch='Hostx64'; BatchArch='x86' },
+    @{ Name='ARM64'; Target='aarch64-pc-windows-msvc'; CompilerArch='arm64'; HostArch='Hostx64'; BatchArch='arm64' }
 )
 
 function Write-Step([string]$Text) {
@@ -36,8 +36,9 @@ function Find-VisualStudio {
             $p = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Select-Object -First 1)
             if ($p) { $p = ([string]$p).Trim() }
             if ($p -and (Test-Path -LiteralPath (Join-Path $p 'VC\Tools\MSVC'))) { return $p }
-        } catch {}
+        } catch { Write-Host "vswhere lookup failed; trying filesystem discovery." -ForegroundColor DarkYellow }
     }
+
     $roots = @()
     if (${env:ProgramFiles(x86)}) { $roots += (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio') }
     if ($env:ProgramFiles) { $roots += (Join-Path $env:ProgramFiles 'Microsoft Visual Studio') }
@@ -56,24 +57,28 @@ function Get-Toolchain([string]$VsInstall, [string]$CompilerArch, [string]$HostA
     $toolset = Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
     if (-not $toolset) { throw "No MSVC toolset found in $msvcRoot" }
 
-    $bin = Join-Path $toolset.FullName "bin\$HostArch\$CompilerArch"
-    $cl = Join-Path $bin 'cl.exe'
-    $link = Join-Path $bin 'link.exe'
-    if (-not (Test-Path -LiteralPath $cl)) {
-        $bin = Join-Path $toolset.FullName "bin\Hostx86\$CompilerArch"
-        $cl = Join-Path $bin 'cl.exe'
-        $link = Join-Path $bin 'link.exe'
-    }
-    if (-not (Test-Path -LiteralPath $cl)) { throw "cl.exe for $CompilerArch was not found in $($toolset.FullName)." }
+    $binCandidates = @(
+        (Join-Path $toolset.FullName "bin\$HostArch\$CompilerArch"),
+        (Join-Path $toolset.FullName "bin\Hostx86\$CompilerArch")
+    )
+    $bin = $binCandidates | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'cl.exe') } | Select-Object -First 1
+    if (-not $bin) { throw "cl.exe for $CompilerArch was not found in $($toolset.FullName)." }
 
-    $sdkRoot = if (${env:ProgramFiles(x86)}) { Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10' } else { Join-Path $env:ProgramFiles 'Windows Kits\10' }
+    $sdkRootCandidates = @()
+    if (${env:ProgramFiles(x86)}) { $sdkRootCandidates += (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10') }
+    if ($env:ProgramFiles) { $sdkRootCandidates += (Join-Path $env:ProgramFiles 'Windows Kits\10') }
+    $sdkRoot = $sdkRootCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $sdkRoot) { throw 'Windows 10 SDK root was not found.' }
+
     $sdkIncludeRoot = Join-Path $sdkRoot 'Include'
     $sdkLibRoot = Join-Path $sdkRoot 'Lib'
-    $sdkVersionDir = Get-ChildItem -LiteralPath $sdkIncludeRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-    $sdkLibVersionDir = Get-ChildItem -LiteralPath $sdkLibRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-    if (-not $sdkVersionDir -or -not $sdkLibVersionDir) { throw "Windows SDK was not found under $sdkRoot" }
+    $sdkVersions = Get-ChildItem -LiteralPath $sdkIncludeRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    $sdkLibVersions = Get-ChildItem -LiteralPath $sdkLibRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    $sdkVersionDir = $sdkVersions | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'um') } | Select-Object -First 1
+    $sdkLibVersionDir = $sdkLibVersions | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'um') } | Select-Object -First 1
+    if (-not $sdkVersionDir -or -not $sdkLibVersionDir) { throw "A usable Windows SDK was not found under $sdkRoot" }
 
-    $sdkArch = switch ($CompilerArch) { 'x64' { 'x64' }; 'x86' { 'x86' }; 'arm64' { 'arm64' } }
+    $sdkArch = $CompilerArch
     $includeDirs = @(
         (Join-Path $toolset.FullName 'include'),
         (Join-Path $sdkVersionDir.FullName 'ucrt'),
@@ -86,18 +91,21 @@ function Get-Toolchain([string]$VsInstall, [string]$CompilerArch, [string]$HostA
         (Join-Path $sdkLibVersionDir.FullName "ucrt\$sdkArch"),
         (Join-Path $sdkLibVersionDir.FullName "um\$sdkArch")
     ) | Where-Object { Test-Path -LiteralPath $_ }
+    if ($libDirs.Count -lt 3) { throw "Incomplete MSVC/Windows SDK library paths for $CompilerArch." }
 
     $sdkBin = Join-Path $sdkRoot "bin\$($sdkLibVersionDir.Name)\$HostArch"
     if (-not (Test-Path -LiteralPath $sdkBin)) { $sdkBin = Join-Path $sdkRoot "bin\$($sdkLibVersionDir.Name)\x64" }
+    if (-not (Test-Path -LiteralPath $sdkBin)) { throw "Windows SDK tools were not found for $($sdkLibVersionDir.Name)." }
 
-    return [pscustomobject]@{
-        Toolset=$toolset.FullName; Version=$toolset.Name; Bin=$bin; Cl=$cl; Link=$link
-        SdkRoot=$sdkRoot; SdkVersion=$sdkVersionDir.Name; Include=($includeDirs -join ';'); Lib=($libDirs -join ';'); SdkBin=$sdkBin
+    [pscustomobject]@{
+        Toolset=$toolset.FullName; Version=$toolset.Name; Bin=$bin
+        Cl=(Join-Path $bin 'cl.exe'); Link=(Join-Path $bin 'link.exe')
+        SdkRoot=$sdkRoot; SdkVersion=$sdkVersionDir.Name
+        Include=($includeDirs -join ';'); Lib=($libDirs -join ';'); SdkBin=$sdkBin
     }
 }
 
 function Activate-DirectMsvc([string]$VsInstall, [string]$CompilerArch, [string]$HostArch) {
-    Write-Host "Activating MSVC directly (bypassing vcvarsall/VsDevCmd): $CompilerArch"
     $tc = Get-Toolchain $VsInstall $CompilerArch $HostArch
     $env:PATH = "$($tc.Bin);$($tc.SdkBin);$($tc.Toolset)\bin;$env:PATH"
     $env:INCLUDE = $tc.Include
@@ -110,30 +118,63 @@ function Activate-DirectMsvc([string]$VsInstall, [string]$CompilerArch, [string]
     $env:UniversalCRTSdkDir = "$($tc.SdkRoot)\"
     $env:UCRTVersion = "$($tc.SdkVersion)\"
     $env:LIBPATH = $tc.Lib
-
+    $env:VSCMD_ARG_TGT_ARCH = $CompilerArch
     $resolved = Get-Command cl.exe -ErrorAction SilentlyContinue
-    if (-not $resolved) { throw "Direct MSVC activation failed: cl.exe is not on PATH." }
-    Write-Host "MSVC compiler ready: $($resolved.Source)" -ForegroundColor Green
+    if (-not $resolved) { throw 'Direct MSVC activation failed: cl.exe is not on PATH.' }
+    Write-Host "Direct MSVC activation succeeded: $($resolved.Source)" -ForegroundColor Green
     Write-Host "MSVC toolset: $($tc.Version) | Windows SDK: $($tc.SdkVersion)"
 }
 
-function Try-BatchMsvc([string]$VcVars, [string]$Arch) {
-    # Optional fallback only. Direct activation above is the primary method because
-    # VS 18.8 batch files can fail with '\Microsoft was unexpected at this time'.
+function Import-CmdEnvironment([string]$BatchFile, [string]$Arch) {
     $cmd = Join-Path $env:TEMP ("mk-foods-vcvars-{0}.cmd" -f ([guid]::NewGuid().ToString('N')))
-    $out = Join-Path $env:TEMP ("mk-foods-vcvars-{0}.txt" -f ([guid]::NewGuid().ToString('N')))
+    $envFile = "$cmd.env"
     try {
-        $short = $VcVars
-        @("@echo off", "call `"$short`" $Arch > `"$out`" 2>&1", 'set MK_VC_EXIT=%ERRORLEVEL%', "set > `"$out.env`"", 'exit /b %MK_VC_EXIT%') | Set-Content -LiteralPath $cmd -Encoding ASCII
+        $escaped = $BatchFile.Replace('"','\"')
+        @(
+            '@echo off',
+            "call `"$escaped`" $Arch >nul 2>&1",
+            'if errorlevel 1 exit /b 1',
+            "set > `"$envFile`"",
+            'exit /b 0'
+        ) | Set-Content -LiteralPath $cmd -Encoding ASCII
         & cmd.exe /d /c $cmd
-        $code = $LASTEXITCODE
-        if ($code -ne 0) { return $false }
-        if (-not (Test-Path -LiteralPath "$out.env")) { return $false }
-        foreach ($line in Get-Content -LiteralPath "$out.env") {
-            $i=$line.IndexOf('='); if ($i -gt 0) { [Environment]::SetEnvironmentVariable($line.Substring(0,$i),$line.Substring($i+1),'Process') }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $envFile)) { return $false }
+        foreach ($line in Get-Content -LiteralPath $envFile) {
+            $i = $line.IndexOf('=')
+            if ($i -gt 0) { [Environment]::SetEnvironmentVariable($line.Substring(0,$i),$line.Substring($i+1),'Process') }
         }
         return [bool](Get-Command cl.exe -ErrorAction SilentlyContinue)
-    } finally { Remove-Item $cmd,$out,"$out.env" -Force -ErrorAction SilentlyContinue }
+    } finally {
+        Remove-Item -LiteralPath $cmd,$envFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Try-BatchMsvc([string]$VsInstall, [string]$Arch) {
+    $candidates = @(
+        (Join-Path $VsInstall 'VC\Auxiliary\Build\vcvarsall.bat'),
+        (Join-Path $VsInstall 'Common7\Tools\VsDevCmd.bat')
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+    foreach ($batch in $candidates) {
+        Write-Host "Fallback MSVC activation: $batch $Arch" -ForegroundColor DarkYellow
+        if (Import-CmdEnvironment $batch $Arch) {
+            Write-Host "Fallback activation succeeded: $batch" -ForegroundColor Green
+            return $true
+        }
+    }
+    return $false
+}
+
+function Activate-Msvc([string]$VsInstall, [string]$CompilerArch, [string]$HostArch, [string]$BatchArch) {
+    Write-Host "Activating MSVC: $CompilerArch"
+    try {
+        Activate-DirectMsvc $VsInstall $CompilerArch $HostArch
+        return
+    } catch {
+        Write-Host "Primary direct activation failed: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+    if (-not (Try-BatchMsvc $VsInstall $BatchArch)) {
+        throw "All MSVC activation methods failed for $CompilerArch. Tried direct MSVC environment, vcvarsall.bat, and VsDevCmd.bat."
+    }
 }
 
 Write-Host '================================================================' -ForegroundColor Yellow
@@ -152,11 +193,10 @@ try {
 
     Write-Step '[3/9] Detecting Visual Studio C++ MSVC tools'
     $vsInstall=Find-VisualStudio
-    $vcvars=Join-Path $vsInstall 'VC\Auxiliary\Build\vcvarsall.bat'
     Write-Host "Visual Studio: $vsInstall"
     Write-Host "MSVC toolset root: $(Join-Path $vsInstall 'VC\Tools\MSVC')"
-    Write-Host 'Primary method: direct MSVC + Windows SDK activation'
-    Activate-DirectMsvc $vsInstall 'x64' 'Hostx64'
+    Write-Host 'Primary method: direct MSVC + Windows SDK; automatic batch fallback enabled'
+    Activate-Msvc $vsInstall 'x64' 'Hostx64' 'x64'
 
     Write-Step '[4/9] Installing / repairing npm dependencies'
     Invoke-Native $npm.Source @('install','--include=dev')
@@ -186,7 +226,7 @@ try {
         Write-Host "`n---------------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host "Building $($t.Name) - $($t.Target)" -ForegroundColor Yellow
         Write-Host "---------------------------------------------------------------" -ForegroundColor DarkGray
-        Activate-DirectMsvc $vsInstall $t.CompilerArch $t.Host
+        Activate-Msvc $vsInstall $t.CompilerArch $t.HostArch $t.BatchArch
         $bundle=Join-Path $Root "src-tauri\target\$($t.Target)\release\bundle\nsis"
         if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }
         Invoke-Native $npx.Source @('--no-install','tauri','build','--bundles','nsis','--target',$t.Target)
