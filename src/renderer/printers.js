@@ -1,27 +1,148 @@
 (() => {
-  const e = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let bluetoothDevice = null, bluetoothServer = null, bluetoothCharacteristic = null, serialPort = null, serialWriter = null;
-  let discoveredPrinters = [], discoveryTimer = null;
-  const BLE_SERVICE_CANDIDATES = ['000018f0-0000-1000-8000-00805f9b34fb','49535343-fe7d-4ae5-8fa9-9fafd205e455'];
-  const BLE_CHARACTERISTIC_CANDIDATES = ['00002af1-0000-1000-8000-00805f9b34fb','49535343-8841-43f4-a8d4-ecbe34729bb3','49535343-1e4d-4bd9-ba61-23c647249616'];
-  const bluetoothSupported = () => !!navigator.bluetooth; const serialSupported = () => !!navigator.serial;
-  async function findWritableCharacteristic(server){for(const serviceId of BLE_SERVICE_CANDIDATES)try{const service=await server.getPrimaryService(serviceId);for(const characteristicId of BLE_CHARACTERISTIC_CANDIDATES)try{const c=await service.getCharacteristic(characteristicId);if(c.properties.write||c.properties.writeWithoutResponse)return c}catch(_){}const chars=await service.getCharacteristics(),c=chars.find(x=>x.properties.write||x.properties.writeWithoutResponse);if(c)return c}catch(_){}for(const service of await server.getPrimaryServices()){const c=(await service.getCharacteristics()).find(x=>x.properties.write||x.properties.writeWithoutResponse);if(c)return c}throw new Error('No writable Bluetooth printer characteristic was found.')}
-  function toast(message,error=false){let box=document.getElementById('printerToast');if(!box){box=document.createElement('div');box.id='printerToast';box.className='workflow-toast';document.body.appendChild(box)}box.textContent=message;box.className=`workflow-toast ${error?'error':'success'}`;box.hidden=false;clearTimeout(box._timer);box._timer=setTimeout(()=>box.hidden=true,3500)}
-  async function connectBluetooth(){if(!bluetoothSupported())throw new Error('Bluetooth LE is not available in this Windows WebView.');bluetoothDevice=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:BLE_SERVICE_CANDIDATES});bluetoothDevice.addEventListener('gattserverdisconnected',()=>{bluetoothServer=null;bluetoothCharacteristic=null;renderBluetoothState()});bluetoothServer=await bluetoothDevice.gatt.connect();bluetoothCharacteristic=await findWritableCharacteristic(bluetoothServer);await window.mkFoods.updateSettings({printerName:bluetoothDevice.name||'Bluetooth Printer',printerMac:bluetoothDevice.id||'',printerConnection:'bluetooth-le',receiptPrinter:bluetoothDevice.name||'Bluetooth Printer'});await load();renderBluetoothState();toast('Bluetooth printer connected and assigned to Receipts.')}
-  async function reconnectKnownBluetooth(){if(!navigator.bluetooth?.getDevices)return;try{const devices=await navigator.bluetooth.getDevices();const d=devices.find(x=>x.name&&x.name===(db.settings?.printerName||''));if(!d)return;bluetoothDevice=d;bluetoothDevice.addEventListener('gattserverdisconnected',()=>{bluetoothServer=null;bluetoothCharacteristic=null;renderBluetoothState()});bluetoothServer=await d.gatt.connect();bluetoothCharacteristic=await findWritableCharacteristic(bluetoothServer);renderBluetoothState()}catch(_){} }
-  async function connectSerial(){if(!serialSupported())throw new Error('Web Serial is not available in this Windows WebView.');serialPort=await navigator.serial.requestPort();await serialPort.open({baudRate:9600});serialWriter=serialPort.writable?.getWriter();await window.mkFoods.updateSettings({printerName:'Bluetooth / COM Printer',printerMac:'',printerConnection:'serial',receiptPrinter:'Bluetooth / COM Printer'});await load();renderBluetoothState();toast('COM printer connected and assigned to Receipts.')}
-  async function disconnectBluetooth(){try{bluetoothDevice?.gatt?.disconnect()}catch(_){}bluetoothDevice=null;bluetoothServer=null;bluetoothCharacteristic=null;try{serialWriter?.releaseLock()}catch(_){}serialWriter=null;try{await serialPort?.close()}catch(_){}serialPort=null;renderBluetoothState();toast('Printer connection closed.')}
-  async function sendRaw(data){const bytes=data instanceof Uint8Array?data:new Uint8Array(data);if(bluetoothCharacteristic){for(let i=0;i<bytes.length;i+=180){const c=bytes.slice(i,i+180);if(bluetoothCharacteristic.properties.writeWithoutResponse)await bluetoothCharacteristic.writeValueWithoutResponse(c);else await bluetoothCharacteristic.writeValue(c)}return true}if(serialWriter){await serialWriter.write(bytes);return true}throw new Error('Connect a Bluetooth / COM printer first.')}
-  async function testBluetoothPrint(){const data=new TextEncoder().encode('\x1b@MK FOODS POS\nPrinter connection test\n\x1b\x64\x04\x1dV\x42\x14');await sendRaw(data)}
-  function renderBluetoothState(){const box=document.getElementById('bluetoothState');if(!box)return;const connected=!!bluetoothCharacteristic||!!serialWriter,saved=db.settings?.printerConnection==='bluetooth-le'||db.settings?.printerConnection==='serial';box.innerHTML=connected?`<div class="notice"><b>Live thermal connection</b><br><span class="muted">${e(bluetoothDevice?.name||'Bluetooth / COM printer')}</span><div class="toolbar" style="margin-top:10px"><button class="mini" onclick="testBluetoothPrint()">Test Print</button><button class="mini secondary" onclick="disconnectBluetooth()">Disconnect</button></div></div>`:saved?`<div class="notice"><b>Saved printer</b><br><span class="muted">${e(db.settings?.printerName||'Bluetooth / COM printer')} · ${e(db.settings?.printerConnection||'saved')}</span><div class="toolbar" style="margin-top:10px"><button class="mini" onclick="reconnectSavedPrinter()">Reconnect</button></div></div>`:'<div class="notice">No live Bluetooth / COM connection.</div>'}
-  window.connectBluetooth=async()=>{try{await connectBluetooth()}catch(err){toast(err?.message||String(err),true)}};window.connectBluetoothSerial=async()=>{try{await connectSerial()}catch(err){toast(err?.message||String(err),true)}};window.reconnectSavedPrinter=async()=>{await reconnectKnownBluetooth();if(!bluetoothCharacteristic&&!serialWriter)toast('Saved Bluetooth device is not currently available. Use Discover Bluetooth.',true);else toast('Saved Bluetooth printer reconnected.')};window.disconnectBluetooth=disconnectBluetooth;window.testBluetoothPrint=async()=>{try{await testBluetoothPrint();toast('Test print sent.')}catch(err){toast(err?.message||String(err),true)}};window.printThermalBytes=sendRaw;
-  const filteredPrinters=()=>{const q=String(document.getElementById('printerLiveSearch')?.value||'').trim().toLowerCase();return discoveredPrinters.filter(p=>!q||`${p.name||''} ${p.status||''}`.toLowerCase().includes(q))};
-  const renderPrinterResults=(scanning=false)=>{const box=document.getElementById('printerList');if(!box)return;const list=filteredPrinters(),selected=db.settings?.printerName||'';box.innerHTML=`<div class="printer-discovery-meta"><span>${scanning?'Searching Windows printers…':`${list.length} printer${list.length===1?'':'s'} found`}</span><span>${discoveredPrinters.length?`Live list · ${new Date().toLocaleTimeString()}`:'Ready to search'}</span></div>`+(list.length?list.map(p=>`<div class="dispatch"><div><b>${e(p.name)}</b><div class="muted">${p.default?'Windows default printer':'Installed printer'} · Status ${e(p.status||'Unknown')}</div></div><button class="mini ${selected===p.name?'secondary':''}" onclick="selectPrinter('${e(p.name).replace(/'/g,'&#39;')}')">${selected===p.name?'Selected':'Select'}</button></div>`).join(''):`<div class="empty-state"><b>${discoveredPrinters.length?'No printers match your search':'No installed Windows printers were found'}</b><span class="muted">${discoveredPrinters.length?'Try a different printer name or status.':'Keep the window open and Scan again when a printer is installed.'}</span></div>`)};
-  window.renderPrinterResults=renderPrinterResults;
-  const populateProfiles=()=>{document.querySelectorAll('.printer-profile-select').forEach(select=>{const current=select.value;select.innerHTML='<option value="">Choose printer…</option>'+discoveredPrinters.map(p=>`<option value="${e(p.name)}">${e(p.name)}</option>`).join('');if([...select.options].some(o=>o.value===current))select.value=current})};
-  window.refreshPrinters=async()=>{renderPrinterResults(true);try{const r=await window.mkFoods.discoverPrinters();if(r?.ok===false){const box=document.getElementById('printerList');if(box)box.innerHTML=`<div class="notice">Could not read Windows printers: ${e(r.reason)}</div>`;return}discoveredPrinters=Array.isArray(r)?r:[];window.mkFoodsPrinters=discoveredPrinters;populateProfiles();renderPrinterResults(false)}catch(err){const box=document.getElementById('printerList');if(box)box.innerHTML=`<div class="notice">Printer discovery failed: ${e(err?.message||err)}</div>`}};
-  const startLiveDiscovery=()=>{clearInterval(discoveryTimer);window.refreshPrinters();discoveryTimer=setInterval(()=>{if(document.getElementById('printerList'))window.refreshPrinters();else clearInterval(discoveryTimer)},4000)};
-  window.selectPrinter=async name=>{const r=await window.mkFoods.connectPrinter(name);if(r?.ok===false){toast(r.reason||'Could not select printer.',true);return}await load();go('printers');toast(`${name} selected for receipts.`)};
-  window.setPrinterProfile=async(profile,name)=>{const key={receipt:'receiptPrinter',kitchen:'kitchenPrinter',expo:'expoPrinter',delivery:'deliveryPrinter'}[profile];if(!key)return;const r=await window.mkFoods.updateSettings({[key]:name});if(r?.ok===false){toast(r.reason||'Could not save printer profile.',true);return}await load();go('printers');toast(`${profile} printer assigned.`)};
-  views.printers=v=>{clearInterval(discoveryTimer);const selected=db.settings?.printerName||'',profiles=[['receipt','Receipt',db.settings?.receiptPrinter||selected],['kitchen','Kitchen / KOT',db.settings?.kitchenPrinter||''],['expo','Expo / Handoff',db.settings?.expoPrinter||''],['delivery','Delivery / Packing',db.settings?.deliveryPrinter||'']];v.innerHTML=shell('Printer Connections','Thermal-first setup · direct Windows RAW · Bluetooth/COM · printer profiles',`<div class="grid cols"><div class="panel printer-discovery-window"><div class="printer-window-title"><div><h2>Live Printer Discovery</h2><p class="muted">Built-in Windows printer discovery. Results refresh automatically while this screen is open.</p></div><span class="live-indicator"><i></i>LIVE</span></div><div class="printer-searchbar"><input id="printerLiveSearch" class="field" placeholder="Search printer name or status…" oninput="renderPrinterResults(false)"><button class="btn" onclick="refreshPrinters()">Scan Now</button></div><div id="printerList"><div class="notice">Starting live Windows printer discovery…</div></div></div><div class="panel"><h2>Bluetooth / COM Thermal</h2><p class="muted">Connect once. The saved device can be reconnected without re-entering setup.</p><div class="toolbar"><button class="btn" onclick="connectBluetooth()">Discover Bluetooth</button><button class="btn secondary" onclick="connectBluetoothSerial()">Connect COM</button></div><div id="bluetoothState" style="margin-top:12px"></div></div><div class="panel"><h2>Printer Profiles</h2><p class="muted">Route receipts and kitchen work to different stations.</p>${profiles.map(([k,label,val])=>`<label class="profile-row"><span><b>${label}</b><small>${val?e(val):'Not assigned'}</small></span><select class="field printer-profile-select" onchange="setPrinterProfile('${k}',this.value)"><option value="">Choose printer…</option>${discoveredPrinters.map(p=>`<option ${p.name===val?'selected':''}>${e(p.name)}</option>`).join('')}</select></label>`).join('')}<p class="muted" style="margin-top:10px">Profiles use the live discovery list.</p></div><div class="panel"><h2>Active Receipt Printer</h2><div class="notice">${selected?`<b>${e(selected)}</b><br><span class="muted">Receipt profile: ${e(db.settings?.receiptPrinter||selected)}</span>`:'No printer selected yet.'}</div></div></div>`);renderBluetoothState();startLiveDiscovery();reconnectKnownBluetooth()};
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let windowsPrinters = [];
+  let bluetoothDevices = [];
+  let scanTimer = null;
+  let scanBusy = false;
+  const toast = (message, error = false) => {
+    let box = document.getElementById('printerToast');
+    if (!box) { box = document.createElement('div'); box.id = 'printerToast'; box.className = 'workflow-toast'; document.body.appendChild(box); }
+    box.textContent = message;
+    box.className = `workflow-toast ${error ? 'error' : 'success'}`;
+    box.hidden = false;
+    clearTimeout(box._timer);
+    box._timer = setTimeout(() => { box.hidden = true; }, 4000);
+  };
+  const testBytes = () => new TextEncoder().encode('\x1b@MK FOODS POS\nPrinter connection test\n\x1b\x64\x04\x1dV\x42\x14');
+  const currentPrinter = () => db.settings?.printerName || '';
+
+  async function testPrinter(name) {
+    const r = await window.mkFoods.printThermal(name, testBytes());
+    if (r?.ok === false) throw new Error(r.reason || 'Windows could not open this printer.');
+    return r;
+  }
+
+  async function selectWindowsPrinter(name, printTest = true) {
+    if (!name) return;
+    const button = document.querySelector(`[data-printer-name="${CSS.escape(name)}"]`);
+    if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
+    try {
+      const saved = await window.mkFoods.connectPrinter(name);
+      if (saved?.ok === false) throw new Error(saved.reason || 'Could not assign printer.');
+      await load();
+      if (printTest) await testPrinter(name);
+      renderPrinterPage();
+      toast(`${name} is connected and ready for receipts.`);
+    } catch (err) {
+      renderPrinterPage();
+      toast(err?.message || String(err), true);
+    }
+  }
+
+  window.selectPrinter = name => selectWindowsPrinter(name, true);
+  window.testSelectedPrinter = async name => {
+    try { await testPrinter(name); toast(`Test print sent to ${name}.`); }
+    catch (err) { toast(err?.message || String(err), true); }
+  };
+
+  function filteredPrinters() {
+    const q = String(document.getElementById('printerLiveSearch')?.value || '').trim().toLowerCase();
+    return windowsPrinters.filter(p => !q || `${p.name || ''} ${p.status || ''} ${p.connection || ''}`.toLowerCase().includes(q));
+  }
+
+  function renderWindowsPrinters(scanning = false) {
+    const box = document.getElementById('printerList');
+    if (!box) return;
+    const list = filteredPrinters();
+    const selected = currentPrinter();
+    box.innerHTML = `
+      <div class="printer-discovery-meta"><b>${scanning ? 'Scanning Windows…' : `${list.length} printer${list.length === 1 ? '' : 's'} found`}</b><span>${windowsPrinters.length ? 'Native Windows spooler' : 'No results yet'}</span></div>
+      ${list.length ? list.map(p => `
+        <div class="printer-row ${p.name === selected ? 'selected' : ''}">
+          <div class="printer-row-main"><span class="printer-state ${p.online ? 'online' : 'offline'}"></span><div><b>${esc(p.name)}</b><small>${esc(p.status || 'Unknown')} · ${esc(p.connection || 'Windows')}</small></div></div>
+          <div class="printer-row-actions"><button class="mini ${p.name === selected ? 'secondary' : ''}" data-action="select-printer" data-printer-name="${esc(p.name)}">${p.name === selected ? 'Connected' : 'Connect'}</button><button class="mini secondary" data-action="test-printer" data-printer-name="${esc(p.name)}">Test</button></div>
+        </div>`).join('') : `<div class="empty-state"><b>${windowsPrinters.length ? 'No matching printers' : 'No Windows printers detected'}</b><span class="muted">Install or pair the printer in Windows, then Scan again.</span></div>`}
+    `;
+  }
+
+  function renderBluetoothDevices() {
+    const box = document.getElementById('bluetoothList');
+    if (!box) return;
+    const paired = bluetoothDevices.filter(d => d.online || d.paired);
+    box.innerHTML = paired.length ? paired.map(d => {
+      const match = windowsPrinters.find(p => p.name.toLowerCase() === String(d.name || '').toLowerCase()) || windowsPrinters.find(p => p.name.toLowerCase().includes(String(d.name || '').toLowerCase()) || String(d.name || '').toLowerCase().includes(p.name.toLowerCase()));
+      return `<div class="bluetooth-row"><div><b>${esc(d.name)}</b><small><span class="printer-state ${d.online ? 'online' : 'offline'}"></span>${esc(d.status || (d.online ? 'Available' : 'Paired'))} · Windows paired device</small></div>${match ? `<button class="mini" data-action="select-printer" data-printer-name="${esc(match.name)}">Use ${esc(match.name)}</button>` : `<span class="tag">Paired</span>`}</div>`;
+    }).join('') : '<div class="empty-state"><b>No paired Bluetooth devices detected</b><span class="muted">Pair the printer in Windows Bluetooth settings. This POS will not open a browser/device picker.</span></div>';
+  }
+
+  async function scanAll() {
+    if (scanBusy) return;
+    scanBusy = true;
+    renderWindowsPrinters(true);
+    const [printersResult, bluetoothResult] = await Promise.allSettled([window.mkFoods.discoverPrinters(), window.mkFoods.discoverBluetooth()]);
+    if (printersResult.status === 'fulfilled' && printersResult.value?.ok !== false) windowsPrinters = Array.isArray(printersResult.value) ? printersResult.value : (printersResult.value?.printers || []);
+    else if (printersResult.status === 'fulfilled') windowsPrinters = [];
+    if (bluetoothResult.status === 'fulfilled' && bluetoothResult.value?.ok !== false) bluetoothDevices = bluetoothResult.value?.devices || [];
+    else bluetoothDevices = [];
+    window.mkFoodsPrinters = windowsPrinters;
+    renderWindowsPrinters(false);
+    renderBluetoothDevices();
+    populateProfiles();
+    scanBusy = false;
+  }
+
+  function populateProfiles() {
+    document.querySelectorAll('.printer-profile-select').forEach(select => {
+      const current = select.dataset.current || select.value || '';
+      select.innerHTML = '<option value="">Choose printer…</option>' + windowsPrinters.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('');
+      select.value = current;
+    });
+  }
+
+  window.refreshPrinters = scanAll;
+  window.setPrinterProfile = async (profile, name) => {
+    const key = { receipt: 'receiptPrinter', kitchen: 'kitchenPrinter', expo: 'expoPrinter', delivery: 'deliveryPrinter' }[profile];
+    if (!key || !name) return;
+    const r = await window.mkFoods.updateSettings({ [key]: name });
+    if (r?.ok === false) { toast(r.reason || 'Could not save printer profile.', true); return; }
+    await load();
+    renderPrinterPage();
+    toast(`${profile} printer assigned.`);
+  };
+
+  function renderPrinterPage() {
+    const v = document.getElementById('view');
+    if (!v || view !== 'printers') return;
+    const selected = currentPrinter();
+    const profiles = [['receipt','Receipt',db.settings?.receiptPrinter || selected],['kitchen','Kitchen / KOT',db.settings?.kitchenPrinter || ''],['expo','Expo / Handoff',db.settings?.expoPrinter || ''],['delivery','Delivery / Packing',db.settings?.deliveryPrinter || '']];
+    v.innerHTML = shell('Printers','Native Windows printer control center · no browser Bluetooth picker', `
+      <div class="printer-console">
+        <section class="panel printer-discovery-window">
+          <div class="printer-window-title"><div><h2>Windows Printers</h2><p class="muted">Live inventory from the Windows print spooler. Connect means the POS validates the printer and sends a real test print.</p></div><span class="live-indicator"><i></i>LIVE</span></div>
+          <div class="printer-searchbar"><input id="printerLiveSearch" class="field" placeholder="Search printers…" oninput="renderPrinterResults(false)"><button class="btn" onclick="refreshPrinters()">Scan Now</button></div>
+          <div id="printerList"></div>
+        </section>
+        <section class="panel printer-bluetooth-window">
+          <div class="printer-window-title"><div><h2>Bluetooth Devices</h2><p class="muted">Native Windows paired-device inventory. No browser prompt or popup.</p></div><span class="tag">NATIVE</span></div>
+          <div id="bluetoothList"></div>
+        </section>
+        <section class="panel">
+          <h2>Printer Routing</h2><p class="muted">Assign each production station to a Windows printer.</p>
+          <div class="printer-profiles">${profiles.map(([k,label,val]) => `<label class="profile-row"><span><b>${label}</b><small>${val ? esc(val) : 'Not assigned'}</small></span><select class="field printer-profile-select" data-current="${esc(val)}" onchange="setPrinterProfile('${k}',this.value)"><option value="">Choose printer…</option>${windowsPrinters.map(p => `<option value="${esc(p.name)}" ${p.name === val ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`).join('')}</div>
+        </section>
+      </div>
+    `);
+    renderWindowsPrinters(false);
+    renderBluetoothDevices();
+  }
+
+  window.renderPrinterResults = renderWindowsPrinters;
+  views.printers = v => { renderPrinterPage(); if (!scanTimer) scanTimer = setInterval(() => { if (view === 'printers' && document.getElementById('printerList')) scanAll(); else { clearInterval(scanTimer); scanTimer = null; } }, 5000); scanAll(); };
+  document.addEventListener('click', event => {
+    const btn = event.target.closest('[data-action="select-printer"],[data-action="test-printer"]');
+    if (!btn) return;
+    const name = btn.getAttribute('data-printer-name') || '';
+    if (btn.dataset.action === 'select-printer') selectWindowsPrinter(name, true);
+    else window.testSelectedPrinter(name);
+  });
 })();
