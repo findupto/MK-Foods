@@ -1,5 +1,5 @@
 (() => {
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   let windowsPrinters = [];
   let bluetoothDevices = [];
   let scanTimer = null;
@@ -11,7 +11,7 @@
     box.className = `workflow-toast ${error ? 'error' : 'success'}`;
     box.hidden = false;
     clearTimeout(box._timer);
-    box._timer = setTimeout(() => { box.hidden = true; }, 4000);
+    box._timer = setTimeout(() => { box.hidden = true; }, 5000);
   };
   const testBytes = () => new TextEncoder().encode('\x1b@MK FOODS POS\nBluetooth printer connection test\n\x1b\x64\x04\x1dV\x42\x14');
   const currentPrinter = () => db.settings?.printerName || '';
@@ -20,6 +20,7 @@
     const hex = String(value || '').replace(/[^0-9a-f]/gi, '').toUpperCase();
     return hex.length === 12 ? hex.match(/.{2}/g).join(':') : '';
   };
+  const printerKey = (name, mac) => `${String(name || '').trim()}|${normalizeMac(mac)}`;
   async function testPrinter(name) {
     const r = await window.mkFoods.printThermal(name, testBytes());
     if (r?.ok === false) throw new Error(r.reason || 'Windows could not open this printer.');
@@ -32,6 +33,13 @@
     if (r?.ok === false) throw new Error(r.reason || 'Bluetooth printer test failed.');
     return r;
   }
+  const findWindowsFallback = name => {
+    const needle = String(name || '').trim().toLowerCase();
+    if (!needle) return null;
+    return windowsPrinters.find(p => String(p.name || '').trim().toLowerCase() === needle)
+      || windowsPrinters.find(p => String(p.name || '').toLowerCase().includes(needle) || needle.includes(String(p.name || '').toLowerCase()))
+      || null;
+  };
   async function selectWindowsPrinter(name, printTest = true) {
     if (!name) return;
     const button = document.querySelector(`[data-printer-name="${CSS.escape(name)}"]`);
@@ -49,31 +57,54 @@
     }
   }
   async function selectBluetoothPrinter(device, printTest = true) {
-    const name = String(device?.name || '').trim();
+    const name = String(device?.name || '').trim() || 'Bluetooth device';
     const mac = normalizeMac(device?.mac);
-    if (!name) return;
-    if (!mac) {
-      toast(`${name} was discovered, but Windows did not expose its Bluetooth address. Remove/re-pair it in Windows and scan again.`, true);
-      return;
-    }
-    const button = document.querySelector(`[data-bt-key="${CSS.escape(`${name}|${mac}`)}"]`);
-    if (button) { button.disabled = true; button.textContent = 'Connecting…'; }
+    const button = document.querySelector(`[data-bt-key="${CSS.escape(printerKey(name, mac))}"]`);
+    if (button) { button.disabled = true; button.querySelector('.bluetooth-device-action')?.replaceChildren(Object.assign(document.createElement('span'), { className: 'mini secondary', textContent: 'Trying…' })); }
+    const failures = [];
     try {
-      // First perform a real RFCOMM/ESC-POS write. Only save the printer after it succeeds.
-      if (printTest) await testBluetooth(mac);
-      const saved = await window.mkFoods.updateSettings({
-        printerName: name,
-        printerMac: mac,
-        printerConnection: 'bluetooth-spp',
-        receiptPrinter: name
-      });
-      if (saved?.ok === false) throw new Error(saved.reason || 'Could not save Bluetooth printer.');
-      await load();
+      // Method 1: direct Bluetooth Classic/RFCOMM SPP. This is the preferred thermal path.
+      if (printTest && mac) {
+        try {
+          await testBluetooth(mac);
+          const saved = await window.mkFoods.updateSettings({ printerName: name, printerMac: mac, printerConnection: 'bluetooth-spp', receiptPrinter: name });
+          if (saved?.ok === false) throw new Error(saved.reason || 'Could not save Bluetooth printer.');
+          await load();
+          renderPrinterPage();
+          toast(`${name} connected directly over Bluetooth SPP.`);
+          return;
+        } catch (err) {
+          failures.push(`Direct Bluetooth: ${err?.message || err}`);
+        }
+      } else if (!mac) {
+        failures.push('Direct Bluetooth: Windows did not expose a usable MAC address.');
+      }
+
+      // Method 2: use an already-installed Windows spooler queue for the same device.
+      const fallback = findWindowsFallback(name);
+      if (printTest && fallback?.name) {
+        try {
+          await testPrinter(fallback.name);
+          const saved = await window.mkFoods.updateSettings({ printerName: fallback.name, printerMac: mac, printerConnection: 'windows-raw', receiptPrinter: fallback.name });
+          if (saved?.ok === false) throw new Error(saved.reason || 'Could not save Windows printer.');
+          await load();
+          renderPrinterPage();
+          toast(`${name} connected through Windows printer queue: ${fallback.name}.`);
+          return;
+        } catch (err) {
+          failures.push(`Windows queue: ${err?.message || err}`);
+        }
+      } else {
+        failures.push('Windows queue: no matching installed printer queue was found.');
+      }
+
+      // Method 3: if there is a MAC but no successful transport, keep the device selectable
+      // and explain exactly what Windows exposed instead of silently disabling it.
       renderPrinterPage();
-      toast(`${name} connected directly over Bluetooth SPP.`);
+      toast(`${name} could not be connected. ${failures.join(' | ')}`, true);
     } catch (err) {
       renderPrinterPage();
-      toast(err?.message || String(err), true);
+      toast(`${name}: ${err?.message || err}`, true);
     }
   }
   window.selectPrinter = name => selectWindowsPrinter(name, true);
@@ -92,15 +123,19 @@
   }
   function renderBluetoothDevices() {
     const box = document.getElementById('bluetoothList'); if (!box) return;
-    const paired = bluetoothDevices.filter(d => d.online || d.paired); const selectedMac = normalizeMac(currentMac());
-    box.innerHTML = paired.length ? paired.map(d => {
-      const name = String(d.name || 'Bluetooth device'); const mac = normalizeMac(d.mac); const isSelected = mac && mac === selectedMac;
-      const key = `${name}|${mac}`;
-      return `<button type="button" class="bluetooth-row ${isSelected ? 'selected' : ''} ${mac ? 'clickable' : ''}" ${mac ? `data-action="select-bluetooth" data-bt-key="${esc(key)}" data-bt-name="${esc(name)}" data-bt-mac="${esc(mac)}"` : 'disabled'} aria-label="${esc(mac ? `Connect ${name}` : name)}">
-        <div class="bluetooth-device-icon">⌁</div><div class="bluetooth-device-info"><b>${esc(name)}</b><small><span class="printer-state ${d.online ? 'online' : 'offline'}"></span>${esc(d.status || (d.online ? 'Available' : 'Paired'))} · ${mac ? esc(mac) : 'MAC unavailable'}</small></div>
-        <div class="bluetooth-device-action">${mac ? `<span class="mini ${isSelected ? 'secondary' : ''}">${isSelected ? '✓ Connected' : 'Connect'}</span>` : '<span class="tag">MAC unavailable</span>'}</div>
+    const selectedMac = normalizeMac(currentMac());
+    box.innerHTML = bluetoothDevices.length ? bluetoothDevices.map(d => {
+      const name = String(d.name || 'Bluetooth device').trim();
+      const mac = normalizeMac(d.mac);
+      const isSelected = !!mac && mac === selectedMac;
+      const key = printerKey(name, mac);
+      const status = d.status || (d.online ? 'Available' : 'Paired');
+      const transport = d.connection || 'Bluetooth';
+      return `<button type="button" class="bluetooth-row ${isSelected ? 'selected' : ''} clickable" data-action="select-bluetooth" data-bt-key="${esc(key)}" data-bt-name="${esc(name)}" data-bt-mac="${esc(mac)}" aria-label="Connect ${esc(name)}">
+        <div class="bluetooth-device-icon">⌁</div><div class="bluetooth-device-info"><b>${esc(name)}</b><small><span class="printer-state ${d.online ? 'online' : 'offline'}"></span>${esc(status)} · ${mac ? esc(mac) : 'MAC unavailable'} · ${esc(transport)}</small></div>
+        <div class="bluetooth-device-action">${isSelected ? '<span class="mini secondary">✓ Connected</span>' : '<span class="mini">Connect</span>'}</div>
       </button>`;
-    }).join('') : '<div class="empty-state"><b>No paired Bluetooth devices detected</b><span class="muted">Pair the printer in Windows Bluetooth settings, then scan again.</span></div>';
+    }).join('') : '<div class="empty-state"><b>No paired Bluetooth devices detected</b><span class="muted">Pair the printer in Windows Bluetooth settings, then Scan again.</span></div>';
   }
   async function scanAll() {
     if (scanBusy) return; scanBusy = true; renderWindowsPrinters(true);
@@ -115,7 +150,7 @@
   function renderPrinterPage() {
     const v = document.getElementById('view'); if (!v || view !== 'printers') return; const selected = currentPrinter();
     const profiles = [['receipt','Receipt',db.settings?.receiptPrinter || selected],['kitchen','Kitchen / KOT',db.settings?.kitchenPrinter || ''],['expo','Expo / Handoff',db.settings?.expoPrinter || ''],['delivery','Delivery / Packing',db.settings?.deliveryPrinter || '']];
-    v.innerHTML = shell('Printers','Windows spooler + direct Bluetooth SPP · clickable device connection', `<div class="printer-console"><section class="panel printer-discovery-window"><div class="printer-window-title"><div><h2>Windows Printers</h2><p class="muted">Live inventory from the Windows print spooler. Connect validates the queue and sends a real test print.</p></div><span class="live-indicator"><i></i>LIVE</span></div><div class="printer-searchbar"><input id="printerLiveSearch" class="field" placeholder="Search printers…" oninput="renderPrinterResults(false)"><button class="btn" onclick="refreshPrinters()">Scan Now</button></div><div id="printerList"></div></section><section class="panel printer-bluetooth-window"><div class="printer-window-title"><div><h2>Bluetooth Printers</h2><p class="muted">Click any discovered Bluetooth printer to connect and send a real ESC/POS test print.</p></div><span class="tag">DIRECT SPP</span></div><div id="bluetoothList"></div></section><section class="panel"><h2>Printer Routing</h2><p class="muted">Assign each production station to a Windows printer. Receipt printing also remembers a direct Bluetooth SPP printer.</p><div class="printer-profiles">${profiles.map(([k,label,val]) => `<label class="profile-row"><span><b>${label}</b><small>${val ? esc(val) : 'Not assigned'}</small></span><select class="field printer-profile-select" data-current="${esc(val)}" onchange="setPrinterProfile('${k}',this.value)"><option value="">Choose printer…</option>${windowsPrinters.map(p => `<option value="${esc(p.name)}" ${p.name === val ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`).join('')}</div></section></div>`);
+    v.innerHTML = shell('Printers','Windows spooler + direct Bluetooth SPP · smart multi-method connection', `<div class="printer-console"><section class="panel printer-discovery-window"><div class="printer-window-title"><div><h2>Windows Printers</h2><p class="muted">Live inventory from the Windows print spooler. Connect validates the queue and sends a real test print.</p></div><span class="live-indicator"><i></i>LIVE</span></div><div class="printer-searchbar"><input id="printerLiveSearch" class="field" placeholder="Search printers…" oninput="renderPrinterResults(false)"><button class="btn" onclick="refreshPrinters()">Scan Now</button></div><div id="printerList"></div></section><section class="panel printer-bluetooth-window"><div class="printer-window-title"><div><h2>Bluetooth Printers & Devices</h2><p class="muted">Every discovered Bluetooth device is selectable. Connect tries direct SPP first, then an installed Windows printer queue.</p></div><span class="tag">SMART CONNECT</span></div><div id="bluetoothList"></div></section><section class="panel"><h2>Printer Routing</h2><p class="muted">Assign each production station to a Windows printer. Receipt printing also remembers a direct Bluetooth SPP printer.</p><div class="printer-profiles">${profiles.map(([k,label,val]) => `<label class="profile-row"><span><b>${label}</b><small>${val ? esc(val) : 'Not assigned'}</small></span><select class="field printer-profile-select" data-current="${esc(val)}" onchange="setPrinterProfile('${k}',this.value)"><option value="">Choose printer…</option>${windowsPrinters.map(p => `<option value="${esc(p.name)}" ${p.name === val ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>`).join('')}</div></section></div>`);
     renderWindowsPrinters(false); renderBluetoothDevices();
   }
   window.renderPrinterResults = renderWindowsPrinters;
