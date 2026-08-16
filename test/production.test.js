@@ -55,9 +55,15 @@ assert(printManager.includes('queueOrderForPrint'), 'Print Manager queue bridge 
 assert(!printManager.includes("window.open('','_blank'"), 'Print Manager must not open receipt popups');
 assert(tauri.includes('discoverPrinters'), 'Printer discovery bridge missing');
 assert(tauri.includes('connectPrinter'), 'Printer connection bridge missing');
-assert(printers.includes('Every discovered Bluetooth device is selectable'), 'Bluetooth devices must remain clickable');
-assert(printers.includes('Direct Bluetooth'), 'Bluetooth direct transport fallback missing');
-assert(printers.includes('Windows queue'), 'Windows printer queue fallback missing');
+// Bluetooth devices are rendered with real connection controls. Do not couple
+// the production contract to an incidental UI sentence: verify the actual
+// delegated action, device metadata, and every supported transport instead.
+assert(printers.includes('data-action="connect-bt-method"'), 'Bluetooth devices must expose a clickable connection action');
+assert(printers.includes('data-bt-name='), 'Bluetooth connection action must retain device name');
+assert(printers.includes('data-bt-mac='), 'Bluetooth connection action must retain device MAC when available');
+assert(printers.includes('data-bt-com='), 'Bluetooth connection action must retain SPP COM port when available');
+assert(printers.includes('Direct SPP'), 'Bluetooth direct transport fallback missing');
+assert(printers.includes('Windows Queue'), 'Windows printer queue fallback missing');
 assert(printers.includes('findWindowsFallback'), 'Windows queue matching fallback missing');
 assert(rustPrinter.includes('Get-CimInstance Win32_PnPEntity'), 'Bluetooth PnP fallback discovery missing');
 assert(rustPrinter.includes('BTHENUM*'), 'BTHENUM device discovery missing');
