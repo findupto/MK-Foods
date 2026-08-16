@@ -2,7 +2,7 @@
   'use strict';
   const role = () => window.mkFoodsSession?.user?.role || window.session?.role || '';
   const permissions = {
-    Owner: ['*'], Admin: ['*'], Manager: ['pos','orderflow','tables','kds','delivery','customers','menu','inventory','suppliers','expenses','staff','counters','printers','printmanager','banking','reports','history','transactions','accounts','settings','cleaning'],
+    Owner: ['*'], Admin: ['*'], Manager: ['pos','orderflow','tables','kds','delivery','customers','menu','inventory','suppliers','expenses','staff','counters','printmanager','banking','reports','history','transactions','accounts','settings','cleaning'],
     'Counter Person': ['pos','orderflow','customers','printmanager','history'], Cashier: ['pos','orderflow','tables','customers','printmanager','history'],
     Waiter: ['pos','orderflow','tables','kds','customers','printmanager'], 'Kitchen Staff': ['kds','printmanager','cleaning'], Kitchen: ['kds','printmanager','cleaning'],
     Rider: ['delivery','orderflow','printmanager'], Dishwasher: ['cleaning'], Accountant: ['dashboard','banking','reports','history','transactions','expenses','inventory'],
