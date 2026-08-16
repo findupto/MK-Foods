@@ -5,9 +5,8 @@
   const line=(label,value,w=42)=>{const a=clean(label),b=clean(value),spaces=Math.max(1,w-a.length-b.length);return a+' '.repeat(spaces)+b+'\n'};
   const center=(s,w=42)=>{s=clean(s);const left=Math.max(0,Math.floor((w-s.length)/2));return ' '.repeat(left)+s+'\n'};
   const moneyText=v=>`${db?.settings?.currency||'Rs.'} ${n(v).toLocaleString(undefined,{maximumFractionDigits:2})}`;
+  const normalizeMac=value=>{const hex=String(value||'').replace(/[^0-9a-f]/gi,'').toUpperCase();return hex.length===12?hex.match(/.{2}/g).join(':'):''};
 
-  // Live Windows printer discovery. The native command enumerates both local
-  // and Windows-connected printers and verifies that each can be opened.
   window.discoverPrinters = async () => {
     try {
       if (!window.mkFoods?.printThermal) return [];
@@ -22,8 +21,6 @@
     }
   };
 
-  // Populate printer selects without assuming a particular settings-screen ID.
-  // Existing saved selection is preserved when the printer is still present.
   const populatePrinterSelects = printers => {
     const selects = [...document.querySelectorAll('select')].filter(el => {
       const key = `${el.id} ${el.name} ${el.dataset?.setting||''}`.toLowerCase();
@@ -57,7 +54,9 @@
   window.printReceipt=async order=>{
     try{
       const printer=db?.settings?.receiptPrinter||db?.settings?.printerName;
-      if(!printer&&!window.printThermalBytes)return window.mkFoodsUX?.toast('Select a receipt printer first.');
+      const connection=db?.settings?.printerConnection||'windows-raw';
+      const mac=normalizeMac(db?.settings?.printerMac);
+      if(!printer && !window.printThermalBytes && !(connection==='bluetooth-spp'&&mac)) return window.mkFoodsUX?.toast('Select a receipt printer first.');
       const W=Number(db?.settings?.receiptWidth||42)>=48?48:42;
       let out='\x1b@\x1bE\x01'+center(db?.settings?.business||'MK FOODS POS',W)+'\x1bE\x00';
       if(db?.settings?.address)out+=center(db.settings.address,W);if(db?.settings?.phone)out+=center(db.settings.phone,W);
@@ -72,13 +71,21 @@
       out+='-'.repeat(W)+'\n'+line('Subtotal',moneyText(order?.subtotal),W);if(n(order?.discount))out+=line('Discount','-'+moneyText(order.discount),W);if(n(order?.tax))out+=line('Tax',moneyText(order.tax),W);if(n(order?.deliveryFee))out+=line('Delivery',moneyText(order.deliveryFee),W);
       out+='-'.repeat(W)+'\n\x1bE\x01'+line('TOTAL',moneyText(order?.total),W)+'\x1bE\x00-' .repeat(W)+'\n'+line('Payment',order?.payment||'-',W);if(order?.paymentStatus)out+=line('Status',order.paymentStatus,W);
       out+='\n'+center(db?.settings?.receiptFooter||'Thank you for visiting!',W)+'\n\n\n\x1dV\x42\x00';
-      const bytes=new TextEncoder().encode(out);if(window.printThermalBytes)await window.printThermalBytes(bytes);else{const r=await window.mkFoods.printThermal(printer,bytes);if(r?.ok===false)throw Error(r.reason||'Print failed')}
-      window.mkFoodsUX?.toast('Receipt sent to printer');
+      const bytes=new TextEncoder().encode(out);
+      if(connection==='bluetooth-spp'&&mac){
+        const r=await window.mkFoods.printThermal(`__BLUETOOTH_RAW__|${mac}`,bytes);
+        if(r?.ok===false)throw Error(r.reason||'Bluetooth print failed');
+      } else if(window.printThermalBytes) {
+        await window.printThermalBytes(bytes);
+      } else {
+        const r=await window.mkFoods.printThermal(printer,bytes);
+        if(r?.ok===false)throw Error(r.reason||'Print failed');
+      }
+      window.mkFoodsUX?.toast(`Receipt sent to ${printer||mac}`);
     }catch(e){console.error(e);window.mkFoodsUX?.toast(`Receipt failed: ${e.message||e}`)}
   };
 
   window.addEventListener('DOMContentLoaded', () => {
-    // Delay until the native bridge and settings data are initialized.
     setTimeout(() => { window.refreshPrinterDiscovery?.(); }, 700);
   });
 })();
