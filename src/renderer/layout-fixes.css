@@ -1,0 +1,13 @@
+/* MK Foods layout hardening: keep one navigation system at a time. */
+body:has(.wc-shell) #nav{display:none!important}
+body:has(.wc-shell) .app{display:block!important;grid-template-columns:none!important;height:calc(100vh - 64px)!important}
+body:has(.wc-shell) .app main{padding:0!important;height:100%!important;overflow:auto!important}
+body:has(.wc-shell) .mk-enterprise-command{margin:0!important;border-radius:0!important}
+.wc-shell{min-height:100%;width:100%;box-sizing:border-box}
+.wc-main{min-width:0;box-sizing:border-box}
+.wc-mobile-nav{z-index:20}
+/* Printer rows must always expose a real pointer/touch target. */
+.wc-printer button,.printer-row-actions button,.bluetooth-row button{pointer-events:auto!important;position:relative;z-index:2;touch-action:manipulation}
+/* Never allow an accidental transparent overlay to intercept printer controls. */
+.wc-printer-list,.printer-row-actions,.bluetooth-row{position:relative;z-index:1}
+@media(max-width:650px){body:has(.wc-shell) .app main{height:100%!important}.wc-main{padding-bottom:72px!important}}
