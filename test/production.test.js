@@ -10,6 +10,8 @@ const printManager = read('src/renderer/print-manager.js');
 const tauri = read('src/renderer/tauri.js');
 const index = read('src/renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
+const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'));
+const cargoText = read('src-tauri/Cargo.toml');
 const workflow = read('.github/workflows/build-windows.yml');
 const windowsBuild = read('build-windows.bat');
 const windowsPowerShell = read('build-windows.ps1');
@@ -51,7 +53,9 @@ assert(printManager.includes('queueOrderForPrint'), 'Print Manager queue bridge 
 assert(!printManager.includes("window.open('','_blank'"), 'Print Manager must not open receipt popups');
 assert(tauri.includes('discoverPrinters'), 'Printer discovery bridge missing');
 assert(tauri.includes('connectPrinter'), 'Printer connection bridge missing');
-assert(pkg.version === '2.0.0', 'Package version must match Tauri application version');
+assert(pkg.version === tauriConfig.version, 'Package version must match Tauri application version');
+assert(pkg.version === '2.2.0', 'Application release version must be 2.2.0');
+assert(cargoText.match(/version\s*=\s*"([^"]+)"/)[1] === pkg.version, 'Cargo package version must match application version');
 assert(workflow.includes('npm test'), 'Windows build must run automated tests');
 assert(!workflow.includes('cache: npm'), 'Windows build must not require a lockfile just to configure npm cache');
 assert(windowsBuild.includes('build-windows.ps1'), 'Windows launcher must call the PowerShell build');
@@ -64,4 +68,4 @@ assert(windowsPowerShell.includes('Try-BatchMsvc'), 'PowerShell build must autom
 assert(windowsPowerShell.includes('aarch64-pc-windows-msvc'), 'Windows build must keep ARM64 target support');
 assert(windowsPowerShell.includes('i686-pc-windows-msvc'), 'Windows build must keep x86 target support');
 
-console.log('Production safety, staged workflow, non-popup printing, and Windows build checks passed.');
+console.log('Production safety, version consistency, staged workflow, non-popup printing, and Windows build checks passed.');
