@@ -10,12 +10,18 @@ const printerNative = read('src-tauri/src/printer.rs');
 const printManager = read('src/renderer/print-manager.js');
 const enterpriseUi = read('src/renderer/enterprise-ui.js');
 const worldClass = read('src/renderer/world-class-pos.js');
+const layoutFixes = read('src/renderer/layout-fixes.css');
+const dialogFree = read('src/renderer/dialog-free-legacy.js');
+const loginWarning = fs.existsSync(path.join(root,'src/renderer/login-warning.js')) ? read('src/renderer/login-warning.js') : '';
 const pkg = JSON.parse(read('package.json'));
 
 assert(index.includes('./banking.js'), 'banking.js must be loaded');
 assert(index.includes('data-view="banking"'), 'Banking navigation must exist');
 assert(index.includes('data-view="printmanager"'), 'Print Manager navigation must exist');
 assert(index.includes('./print-manager.js'), 'print-manager.js must be loaded');
+assert(index.includes('./layout-fixes.css'), 'Layout hardening CSS must be loaded');
+assert(index.includes('./dialog-free-legacy.js'), 'Popup-free legacy action layer must be loaded');
+assert(!index.includes('./login-warning.js'), 'Native login alert hook must not be loaded');
 assert(banking.includes('Raast P2M / 1LINK'), 'Raast/1LINK provider option must exist');
 assert(banking.includes('Bank Transfer / Raast'), 'Bank tender must exist');
 assert(printers.includes('discoverBluetooth'), 'Native Bluetooth discovery bridge must exist');
@@ -32,5 +38,9 @@ assert(printManager.includes('Pass / Print'), 'Print jobs must be passable to pr
 assert(!printManager.includes("alert(`${o.id}"), 'Print order details must not use an order-detail popup');
 assert(enterpriseUi.includes('enhanceNav'), 'Enterprise navigation enhancement must exist');
 assert(worldClass.includes('wc-shell'), 'World-class POS workspace must exist');
+assert(layoutFixes.includes('body:has(.wc-shell) #nav'), 'Duplicate sidebar prevention must exist');
+assert(dialogFree.includes('window.deleteProduct'), 'Popup-free delete action must exist');
+assert(dialogFree.includes('window.dispatchOrder'), 'Popup-free dispatch action must exist');
+assert(!loginWarning.includes('nativeAlert'), 'Native alert implementation must not remain active');
 assert(typeof pkg.scripts.test === 'string', 'npm test script must exist');
 console.log('MK Foods renderer/native smoke tests passed');
