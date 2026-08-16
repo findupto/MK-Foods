@@ -77,10 +77,14 @@ unsafe fn enumerate_printers() -> Result<Vec<Value>, String> {
 #[cfg(windows)]
 fn bluetooth_mac_from_instance(instance: &str) -> String {
     let upper = instance.to_ascii_uppercase();
-    if let Some(pos) = upper.find("DEV_") {
-        let tail = &upper[pos + 4..];
-        let mac: String = tail.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
-        if mac.len() == 12 { return mac.chars().collect::<Vec<_>>().chunks(2).map(|x| x.iter().collect::<String>()).collect::<Vec<_>>().join(":"); }
+    for marker in ["DEV_", "ADDR_"] {
+        if let Some(pos) = upper.find(marker) {
+            let tail = &upper[pos + marker.len()..];
+            let mac: String = tail.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+            if mac.len() == 12 {
+                return mac.chars().collect::<Vec<_>>().chunks(2).map(|x| x.iter().collect::<String>()).collect::<Vec<_>>().join(":");
+            }
+        }
     }
     String::new()
 }
@@ -88,14 +92,57 @@ fn bluetooth_mac_from_instance(instance: &str) -> String {
 #[cfg(windows)]
 fn enumerate_bluetooth_devices() -> Result<Vec<Value>, String> {
     use std::process::Command;
-    let script = r#"$ErrorActionPreference='SilentlyContinue'; $x=Get-PnpDevice -Class Bluetooth | Where-Object {$_.FriendlyName -and $_.FriendlyName -notmatch 'Bluetooth Adapter|Microsoft Bluetooth|Enumerator'} | Select-Object FriendlyName,Status,InstanceId; if($x){$x|ConvertTo-Json -Compress}else{'[]'}"#;
+    // Bluetooth printers are not consistently exposed by Windows under the
+    // Bluetooth device class. Some appear as BTHENUM PnP entities or as the
+    // serial-port side of an SPP pairing, so inspect both PnP surfaces.
+    let script = r#"
+$ErrorActionPreference='SilentlyContinue'
+$rows=@()
+$rows += @(Get-PnpDevice -PresentOnly | Where-Object {
+  $_.FriendlyName -and (
+    $_.InstanceId -like 'BTHENUM*' -or
+    $_.Class -eq 'Bluetooth' -or
+    $_.Class -eq 'Ports' -or
+    $_.FriendlyName -match 'Bluetooth'
+  )
+} | Select-Object FriendlyName,Status,InstanceId,Class)
+$rows += @(Get-CimInstance Win32_PnPEntity | Where-Object {
+  $_.Name -and $_.PNPDeviceID -like 'BTHENUM*'
+} | ForEach-Object {
+  [PSCustomObject]@{FriendlyName=$_.Name;Status=if($_.Status){$_.Status}else{'Unknown'};InstanceId=$_.PNPDeviceID;Class=$_.PNPClass}
+})
+$rows | Where-Object {$_.FriendlyName} | ConvertTo-Json -Compress
+"#;
     let out = Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",script]).output().map_err(|e| format!("BLUETOOTH_ENUMERATION_FAILED: {e}"))?;
     if !out.status.success() { return Err("BLUETOOTH_ENUMERATION_FAILED".into()); }
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() { return Ok(Vec::new()); }
     let raw: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!([]));
     let rows = if raw.is_array() { raw } else { json!([raw]) };
-    Ok(rows.as_array().unwrap().iter().map(|x| { let instance=x["InstanceId"].as_str().unwrap_or(""); let mac=bluetooth_mac_from_instance(instance); let status=x["Status"].as_str().unwrap_or("Unknown"); json!({"name":x["FriendlyName"].as_str().unwrap_or("Bluetooth device"),"status":status,"instanceId":instance,"mac":mac,"connection":"bluetooth-windows","paired":true,"online":status.eq_ignore_ascii_case("OK")}) }).collect())
+    let mut result: Vec<Value> = Vec::new();
+    for x in rows.as_array().unwrap() {
+        let instance = x["InstanceId"].as_str().unwrap_or("");
+        let mac = bluetooth_mac_from_instance(instance);
+        let status = x["Status"].as_str().unwrap_or("Unknown");
+        let name = x["FriendlyName"].as_str().unwrap_or("Bluetooth device").trim();
+        if name.is_empty() { continue; }
+        let duplicate = result.iter().any(|d| {
+            d["name"].as_str().unwrap_or("").eq_ignore_ascii_case(name)
+                && (mac.is_empty() || d["mac"].as_str().unwrap_or("").eq_ignore_ascii_case(&mac))
+        });
+        if duplicate { continue; }
+        result.push(json!({
+            "name":name,
+            "status":status,
+            "instanceId":instance,
+            "mac":mac,
+            "connection":"bluetooth-windows",
+            "paired":true,
+            "online":status.eq_ignore_ascii_case("OK")
+        }));
+    }
+    result.sort_by(|a,b| a["name"].as_str().unwrap_or("").to_ascii_lowercase().cmp(&b["name"].as_str().unwrap_or("").to_ascii_lowercase()));
+    Ok(result)
 }
 
 #[cfg(windows)]
@@ -123,8 +170,8 @@ fn print_bluetooth_spp(mac:&str,data:&[u8])->Result<u32,String>{
     let mut wsa=[0u8;400];
     let startup=unsafe{WSAStartup(0x0202,wsa.as_mut_ptr() as *mut c_void)};
     if startup!=0{return Err(format!("BLUETOOTH_SOCKET_INIT_FAILED: {startup}"));}
-    // Serial Port Profile UUID in Windows GUID byte order. With serviceClassId
-    // supplied and port=0, Windows resolves the RFCOMM channel through SDP.
+    // Standard Serial Port Profile UUID: 00001101-0000-1000-8000-00805F9B34FB.
+    // With port=0 Windows performs SDP resolution for the service class.
     let spp_uuid:[u8;16]=[0x01,0x11,0x00,0x00,0x00,0x00,0x00,0x10,0x80,0x00,0x00,0x80,0x5f,0x9b,0x34,0xfb];
     let addr=SockAddrBth{address_family:32,bt_addr,service_class_id:spp_uuid,port:0};
     let sock=unsafe{socket(32,1,3)};
