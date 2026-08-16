@@ -1,89 +1,16 @@
 (() => {
-  const key = 'mk-foods-print-queue-v1';
-  const read = () => { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch (_) { return []; } };
-  const write = rows => localStorage.setItem(key, JSON.stringify(rows));
-  const num = v => Number(v || 0);
-  const text = v => String(v ?? '');
-  const escP = s => esc(text(s));
-  const queue = order => {
-    if (!order?.id) return;
-    const rows = read();
-    const copy = JSON.parse(JSON.stringify(order));
-    const i = rows.findIndex(x => x.id === copy.id);
-    if (i >= 0) rows[i] = { ...rows[i], ...copy, queuedAt: rows[i].queuedAt || new Date().toISOString() };
-    else rows.unshift({ ...copy, queuedAt: new Date().toISOString(), printStatus: 'queued' });
-    write(rows);
-  };
-  const remove = id => { write(read().filter(x => x.id !== id)); renderManager(); };
-  const clearDone = () => { write(read().filter(x => x.printStatus !== 'printed')); renderManager(); };
-  const receiptHtml = order => {
-    const items = Array.isArray(order.items) ? order.items : [];
-    const itemRows = items.map(i => `<tr><td>${escP(i.name)}${i.note ? `<br><small>${escP(i.note)}</small>` : ''}</td><td>${num(i.qty)}</td><td>${money(num(i.price) * num(i.qty))}</td></tr>`).join('');
-    return `<section class="print-receipt"><h2>${escP(db.settings?.business || 'MK Foods POS')}</h2><div class="center">${escP(db.settings?.phone || '')}</div><div class="print-line"></div><div><b>${escP(order.id)}</b><br>${new Date(order.createdAt || Date.now()).toLocaleString()}</div>${order.customerName ? `<div>Customer: ${escP(order.customerName)}</div>` : ''}${order.orderType ? `<div>Type: ${escP(order.orderType)}</div>` : ''}<div class="print-line"></div><table>${itemRows}</table><div class="print-line"></div><div>Subtotal: ${money(order.subtotal)}</div><div>Discount: -${money(order.discount)}</div><div>Tax: ${money(order.tax)}</div>${num(order.deliveryFee) ? `<div>Delivery: ${money(order.deliveryFee)}</div>` : ''}<div class="print-total"><span>Total</span><span>${money(order.total)}</span></div><div class="print-line"></div><div>Payment: ${escP(order.payment || 'Cash')} · ${escP(order.paymentStatus || 'pending')}</div><div class="center" style="margin-top:10px">Thank you!</div></section>`;
-  };
-  const printOrder = id => {
-    const order = read().find(x => x.id === id);
-    if (!order) return;
-    const area = document.getElementById('printOutput');
-    if (!area) return;
-    document.body.classList.add('printing-receipt');
-    area.innerHTML = receiptHtml(order);
-    requestAnimationFrame(() => {
-      window.print();
-      setTimeout(() => {
-        document.body.classList.remove('printing-receipt');
-        area.innerHTML = '';
-        write(read().map(x => x.id === id ? { ...x, printStatus: 'printed', printedAt: new Date().toISOString() } : x));
-        renderManager();
-      }, 300);
-    });
-  };
-  window.printReceipt = order => { queue(order); go('printmanager'); };
-  window.queueOrderForPrint = order => { queue(order); go('printmanager'); };
-  window.removePrintOrder = remove;
-  window.printQueuedOrder = printOrder;
-  window.clearPrintedQueue = clearDone;
-  window.addOrderToPrintQueue = () => {
-    const id = document.getElementById('printOrderSelect')?.value;
-    const order = (db.orders || []).find(x => x.id === id);
-    if (!order) return;
-    queue(order); renderManager();
-  };
-  window.addManualPrintOrder = () => {
-    const id = document.getElementById('manualPrintId')?.value.trim() || `MAN-${Date.now()}`;
-    const customerName = document.getElementById('manualPrintCustomer')?.value.trim() || '';
-    const itemText = document.getElementById('manualPrintItems')?.value.trim() || '';
-    const total = num(document.getElementById('manualPrintTotal')?.value);
-    if (!itemText || total <= 0) return;
-    const items = itemText.split(/\n|,/).map(s => s.trim()).filter(Boolean).map(name => ({ id: `manual-${Date.now()}-${Math.random()}`, name, price: 0, qty: 1 }));
-    queue({ id, createdAt: new Date().toISOString(), customerName, items, subtotal: total, discount: 0, tax: 0, deliveryFee: 0, total, payment: document.getElementById('manualPrintPayment')?.value || 'Cash', paymentStatus: 'settled', orderType: 'Manual' });
-    renderManager();
-  };
-  function renderManager() {
-    const v = document.getElementById('view');
-    if (!v || view !== 'printmanager') return;
-    const rows = read();
-    const queued = rows.filter(x => x.printStatus !== 'printed');
-    const printed = rows.filter(x => x.printStatus === 'printed');
-    const options = (db.orders || []).filter(o => !rows.some(q => q.id === o.id && q.printStatus !== 'printed')).map(o => `<option value="${escP(o.id).replace(/'/g, '&#39;')}">${escP(o.id)} · ${escP(o.customerName || 'Walk-in')} · ${money(o.total)}</option>`).join('');
-    v.innerHTML = shell('Print Manager','Manage receipts in one window — no receipt popup', `<div class="print-manager"><div class="panel print-toolbar-panel"><div class="toolbar"><div><h2>Print Queue</h2><p class="muted">Add, remove, review and pass orders to printing from this window.</p></div><div class="actions"><button class="btn" onclick="go('pos')">New Order</button><button class="btn secondary" onclick="clearPrintedQueue()">Clear Printed</button></div></div><div class="formgrid"><label class="wide">Add existing order<select id="printOrderSelect" class="field"><option value="">Select an order...</option>${options}</select></label><button class="btn" onclick="addOrderToPrintQueue()">Add to Queue</button></div></div><div class="grid cols"><div class="panel"><h2>Queued / Pending (${queued.length})</h2>${queued.map(o => `<div class="print-job"><div><b>${escP(o.id)}</b><div>${escP(o.customerName || 'Walk-in')} · ${escP(o.orderType || 'Order')} · ${money(o.total)}</div><small class="muted">${new Date(o.createdAt || o.queuedAt || Date.now()).toLocaleString()} · ${Array.isArray(o.items) ? o.items.length : 0} item(s)}</small></div><div class="toolbar"><button class="mini" onclick="showPrintOrderDetails('${escP(o.id).replace(/'/g, '&#39;')}')">Details</button><button class="mini" onclick="printQueuedOrder('${escP(o.id).replace(/'/g, '&#39;')}')">Pass / Print</button><button class="mini danger" onclick="removePrintOrder('${escP(o.id).replace(/'/g, '&#39;')}')">Remove</button></div></div>`).join('') || '<div class="notice">No pending print jobs.</div>'}</div><div class="panel"><h2>Manual Receipt</h2><p class="muted">Create a receipt for an order that is not in the POS database.</p><div class="formgrid"><label>Order ID<input id="manualPrintId" class="field" placeholder="Optional"></label><label>Customer<input id="manualPrintCustomer" class="field" placeholder="Walk-in"></label><label class="wide">Items<input id="manualPrintItems" class="field" placeholder="Pizza x1, Fries x2"></label><label>Total<input id="manualPrintTotal" class="field" type="number" min="0" step="0.01"></label><label>Payment<select id="manualPrintPayment" class="field"><option>Cash</option><option>Card</option><option>Online</option><option>COD</option></select></label></div><button class="btn" onclick="addManualPrintOrder()">Add Manual Receipt</button></div></div><div class="panel"><h2>Printed History (${printed.length})</h2>${printed.slice(0,30).map(o => `<div class="print-job"><div><b>${escP(o.id)}</b><div>${escP(o.customerName || 'Walk-in')} · ${money(o.total)}</div><small class="muted">Printed ${o.printedAt ? new Date(o.printedAt).toLocaleString() : ''}</small></div><div class="toolbar"><button class="mini" onclick="showPrintOrderDetails('${escP(o.id).replace(/'/g, '&#39;')}')">Details</button><button class="mini" onclick="printQueuedOrder('${escP(o.id).replace(/'/g, '&#39;')}')">Reprint</button><button class="mini danger" onclick="removePrintOrder('${escP(o.id).replace(/'/g, '&#39;')}')">Remove</button></div></div>`).join('') || '<p class="muted">No printed receipts yet.</p>'}</div><div id="printOutput"></div></div>`);
-  }
-  window.showPrintOrderDetails = id => {
-    const o = read().find(x => x.id === id); if (!o) return;
-    const lines = (o.items || []).map(i => `<div class="orderline"><span>${num(i.qty) || 1} × ${escP(i.name || 'Item')}</span><b>${money(num(i.price) * num(i.qty || 1))}</b></div>`).join('');
-    const area = document.getElementById('printOutput');
-    if (area) area.innerHTML = `<div class="panel print-detail-panel"><div class="toolbar"><div><h2>${escP(o.id)}</h2><p class="muted">${escP(o.customerName || 'Walk-in')} · ${escP(o.orderType || 'Order')}</p></div><button class="mini" onclick="document.getElementById('printOutput').innerHTML=''">Close</button></div>${lines}<div class="total"><span>Total</span><strong>${money(o.total)}</strong></div><div class="toolbar"><button class="btn" onclick="printQueuedOrder('${escP(o.id).replace(/'/g, '&#39;')}')">Pass / Print</button><button class="btn secondary" onclick="removePrintOrder('${escP(o.id).replace(/'/g, '&#39;')}')">Remove</button></div></div>`;
-    area.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  };
-  views.printmanager = renderManager;
-  window.openPrintManager = () => go('printmanager');
-  window.refreshPrintManager = renderManager;
-  const originalCheckoutEnhanced = window.checkoutEnhanced;
-  if (typeof originalCheckoutEnhanced === 'function') {
-    window.checkoutEnhanced = async (...args) => {
-      const oldConfirm = window.confirm;
-      window.confirm = () => true;
-      try { return await originalCheckoutEnhanced(...args); } finally { window.confirm = oldConfirm; }
-    };
-  }
+  const key='mk-foods-print-queue-v2';
+  const read=()=>{try{return JSON.parse(localStorage.getItem(key)||'[]')}catch(_){return[]}};
+  const write=v=>localStorage.setItem(key,JSON.stringify(v)); const num=v=>Number(v||0); const escP=s=>esc(String(s??''));
+  const printer=()=>db.settings?.printerName||'';
+  const queue=o=>{if(!o?.id)return;const a=read(),i=a.findIndex(x=>x.id===o.id),v={...JSON.parse(JSON.stringify(o)),queuedAt:new Date().toISOString(),printStatus:'queued'};if(i>=0)a[i]={...a[i],...v};else a.unshift(v);write(a)};
+  const remove=id=>{write(read().filter(x=>x.id!==id));renderManager()}; const clearDone=()=>{write(read().filter(x=>x.printStatus!=='printed'));renderManager()};
+  const wrap=(s,w)=>{const a=[];String(s||'').split(/\r?\n/).forEach(l=>{while(l.length>w){a.push(l.slice(0,w));l=l.slice(w)}a.push(l)});return a};
+  const thermal=o=>{const e=new TextEncoder(),a=[],p=s=>a.push(...e.encode(s)),clean=s=>String(s??'').replace(/[\x00-\x1f\x7f]/g,''),W=42;p('\x1b@\x1b\x61\x01'+(db.settings?.business||'MK FOODS POS')+'\n');if(db.settings?.phone)p(clean(db.settings.phone)+'\n');p('\x1b\x61\x00'+'-'.repeat(W)+'\n');p('Order: '+clean(o.id)+'\n'+new Date(o.createdAt||Date.now()).toLocaleString()+'\n');if(o.customerName)p('Customer: '+clean(o.customerName)+'\n');if(o.orderType)p('Type: '+clean(o.orderType)+'\n');p('-'.repeat(W)+'\n');(o.items||[]).forEach(i=>{const q=num(i.qty)||1,t=num(i.price)*q;wrap(clean(i.name||'Item'),29).forEach((n,j)=>p(j?n.padEnd(29):n.padEnd(29)+' '+String(q).padStart(3)+' '+t.toFixed(0).padStart(7)+'\n'))});p('-'.repeat(W)+'\n');[['Subtotal',o.subtotal],['Discount',num(o.discount)?-num(o.discount):null],['Tax',o.tax],['Delivery',o.deliveryFee]].forEach(([n,v])=>{if(v!==null&&v!==undefined&&num(v)!==0)p(clean(n).padEnd(32)+num(v).toFixed(0).padStart(10)+'\n')});p('\x1b\x45\x01'+'TOTAL'.padEnd(32)+num(o.total).toFixed(0).padStart(10)+'\n\x1b\x45\x00'+'-'.repeat(W)+'\nPayment: '+clean(o.payment||'Cash')+'\n\x1b\x61\x01Thank you!\n\n\n\x1d\x56\x00');return Array.from(new Uint8Array(a))};
+  async function printOrder(id){const o=read().find(x=>x.id===id);if(!o)return;if(!printer()){toast('Select a printer first.',true);return}try{if(typeof window.mkFoods.printThermal!=='function')throw new Error('Native thermal printer runtime is not installed.');const r=await window.mkFoods.printThermal(printer(),thermal(o));if(r?.ok===false)throw new Error(r.reason||'Thermal print failed.');write(read().map(x=>x.id===id?{...x,printStatus:'printed',printedAt:new Date().toISOString(),printError:''}:x));toast(`${id} sent to ${printer()}`);renderManager()}catch(e){write(read().map(x=>x.id===id?{...x,printStatus:'error',printError:String(e?.message||e)}:x));toast(String(e?.message||e),true);renderManager()}}
+  window.printReceipt=o=>{queue(o);toast(`Order ${o.id} added to queue.`);renderManager()};window.queueOrderForPrint=window.printReceipt;window.removePrintOrder=remove;window.printQueuedOrder=printOrder;window.retryPrintOrder=printOrder;window.clearPrintedQueue=clearDone;
+  window.addOrderToPrintQueue=()=>{const id=document.getElementById('printOrderSelect')?.value,o=(db.orders||[]).find(x=>x.id===id);if(!o)return;queue(o);renderManager();toast(`${id} added.`)};
+  function renderManager(){const v=document.getElementById('view');if(!v||view!=='printmanager')return;const rows=read(),q=rows.filter(x=>x.printStatus!=='printed'),done=rows.filter(x=>x.printStatus==='printed'),sel=printer();v.innerHTML=shell('Print Center','Fast thermal printing · no PDF · no browser popup',`<div class="print-center"><div class="print-statusbar ${sel?'ready':''}"><div><span class="status-dot"></span><b>${sel?'Printer Ready':'No Printer Selected'}</b><span class="muted">${sel?escP(sel):'Choose a printer from Printer Connections'}</span></div><div class="actions"><button class="btn secondary" onclick="go('printers')">Printer Connections</button><button class="btn" onclick="refreshPrintManager()">Refresh</button></div></div><div class="print-quickbar"><select id="printOrderSelect" class="field"><option value="">Add existing order…</option>${(db.orders||[]).slice(0,100).map(o=>`<option value="${escP(o.id)}">${escP(o.id)} · ${escP(o.customerName||'Walk-in')} · ${money(o.total)}</option>`).join('')}</select><button class="btn" onclick="addOrderToPrintQueue()">Add</button><button class="btn secondary" onclick="go('pos')">New Order</button></div><div class="grid cols print-columns"><section class="panel"><div class="section-head"><div><h2>Print Queue <span class="count-pill">${q.length}</span></h2><p class="muted">Pass orders directly to the thermal printer.</p></div><button class="mini" onclick="clearPrintedQueue()">Clear printed</button></div><div class="print-queue">${q.map(o=>`<article class="print-card ${o.printStatus==='error'?'failed':''}"><div><div class="print-card-id">${escP(o.id)}</div><div class="print-card-meta">${escP(o.customerName||'Walk-in')} · ${escP(o.orderType||'Order')} · ${money(o.total)}</div>${o.printError?`<div class="print-error">${escP(o.printError)}</div>`:''}</div><div class="print-card-actions"><button class="mini" onclick="showPrintOrderDetails('${escP(o.id)}')">View</button><button class="mini primary-mini" onclick="printQueuedOrder('${escP(o.id)}')">${o.printStatus==='error'?'Retry':'Print'}</button><button class="mini danger" onclick="removePrintOrder('${escP(o.id)}')">Remove</button></div></article>`).join('')||'<div class="empty-state"><b>Queue is clear</b><span class="muted">Completed orders can be printed here instantly.</span></div>'}</div></section><section class="panel"><div class="section-head"><div><h2>Recent Prints <span class="count-pill">${done.length}</span></h2><p class="muted">Reprint without creating another order.</p></div></div><div class="print-queue">${done.slice(0,20).map(o=>`<article class="print-card"><div><div class="print-card-id">${escP(o.id)}</div><div class="print-card-meta">${escP(o.customerName||'Walk-in')} · ${money(o.total)}</div><small class="muted">${o.printedAt?new Date(o.printedAt).toLocaleString():''}</small></div><div class="print-card-actions"><button class="mini primary-mini" onclick="printQueuedOrder('${escP(o.id)}')">Reprint</button></div></article>`).join('')||'<div class="empty-state"><span class="muted">No printed orders yet.</span></div>'}</div></section></div><div id="printOutput"></div></div>`)}
+  window.showPrintOrderDetails=id=>{const o=read().find(x=>x.id===id),a=document.getElementById('printOutput');if(!o||!a)return;a.innerHTML=`<div class="panel print-detail-panel"><div class="section-head"><div><h2>${escP(o.id)}</h2><p class="muted">${escP(o.customerName||'Walk-in')} · ${escP(o.orderType||'Order')}</p></div><button class="mini" onclick="document.getElementById('printOutput').innerHTML=''">Close</button></div>${(o.items||[]).map(i=>`<div class="orderline"><span>${num(i.qty)||1} × ${escP(i.name||'Item')}</span><b>${money(num(i.price)*num(i.qty||1))}</b></div>`).join('')}<div class="total"><span>Total</span><strong>${money(o.total)}</strong></div><div class="actions"><button class="btn" onclick="printQueuedOrder('${escP(o.id)}')">Print Thermal</button><button class="btn secondary" onclick="removePrintOrder('${escP(o.id)}')">Remove</button></div></div>`;a.scrollIntoView({behavior:'smooth',block:'center'})};
+  views.printmanager=renderManager;window.openPrintManager=()=>go('printmanager');window.refreshPrintManager=renderManager;
 })();
