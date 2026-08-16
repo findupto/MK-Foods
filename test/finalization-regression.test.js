@@ -1,0 +1,9 @@
+const fs=require('fs');const vm=require('vm');
+function load(file,extra={}){const src=fs.readFileSync(file,'utf8');const sandbox={console,localStorage:{data:{},getItem(k){return this.data[k]||null},setItem(k,v){this.data[k]=v}},window:{addEventListener(){},...extra},document:{},navigator:{onLine:false},prompt(){return null},Blob:function(){},URL:{createObjectURL(){return''},revokeObjectURL(){}},setTimeout,clearTimeout};vm.createContext(sandbox);vm.runInContext(src,sandbox,{filename:file});return sandbox}
+const base=process.cwd()+'/src/renderer/';
+let s=load(base+'production-hardening.js');const p=s.window.mkFoodsProduction;
+let o={status:'draft'};p.transition(o,'confirmed','Cashier');p.transition(o,'sent_to_kitchen','Cashier');p.transition(o,'preparing','Kitchen');p.transition(o,'ready','Kitchen');p.transition(o,'completed','Manager');if(o.status!=='completed')throw Error('State transition regression');
+const pay=p.allocatePayment(100,[{method:'cash',amount:60},{method:'card',amount:30}]);if(pay.paid!==90||pay.due!==10||pay.change!==0)throw Error('Payment regression');
+const shift=p.reconcileShift({openingCash:1000,actualCash:1250},[{type:'cash_in',amount:50}], [{payments:[{method:'cash',amount:200}]}]);if(shift.expectedCash!==1250||shift.variance!==0)throw Error('Shift reconciliation regression');
+let q=load(base+'production-completion.js');const m=q.window.mkProduction;const ing=m.saveIngredient({name:'Cheese',unit:'g',costPerUnit:.02,stock:1000,minStock:100});if(!ing||!ing.id)throw Error('Ingredient persistence regression');m.saveRecipe('p1',[{ingredientId:ing.id,qty:100,unit:'g'}]);if(m.recipeCost('p1')!==2)throw Error('Recipe costing regression');m.consumeRecipe('p1',2);if(m.state().ingredients[ing.id].stock!==800)throw Error('Recipe consumption regression');
+console.log('Finalization regression checks passed.');
