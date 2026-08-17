@@ -15,7 +15,8 @@ assert(rust.includes('__BLUETOOTH_COM__|'), 'Bluetooth COM transport missing');
 assert(rust.includes('__NETWORK_RAW__|'), 'Network RAW transport missing');
 assert(rust.includes('WriteFile'), 'Raw COM write transport missing');
 assert(rust.includes('windows-raw'), 'Windows RAW spooler transport missing');
-assert(rust.includes('tried 3 RFCOMM/SPP attempts'), 'Bluetooth retry policy missing');
+assert(/for\s+attempt\s+in\s+1\.\.\=3/.test(rust), 'Bluetooth retry loop missing');
+assert(/attempt\s*<\s*3/.test(rust), 'Bluetooth retry backoff missing');
 
 assert(ui.includes('bluetooth-spp'), 'Direct SPP UI route missing');
 assert(ui.includes('bluetooth-com'), 'SPP COM UI route missing');
