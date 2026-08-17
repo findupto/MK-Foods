@@ -1,157 +1,139 @@
 (() => {
   'use strict';
 
-  // Bluetooth thermal printers on Windows can expose several usable routes.
-  // Prefer an already assigned SPP COM port, then direct SPP, while keeping
-  // the Windows queue as the final fallback. The saved route is restored after
-  // every POS relaunch without sending a test receipt to the printer.
-  const esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+  // Windows Bluetooth thermal printers can expose several usable routes.
+  // Prefer SPP COM, then direct SPP, then the Windows printer queue. Never
+  // surface an intermediate transport failure if a later route succeeds.
   const mac = v => { const h=String(v||'').replace(/[^0-9a-f]/gi,'').toUpperCase(); return h.length===12?h.match(/.{2}/g).join(':'):''; };
   const com = v => { const x=String(v||'').trim().toUpperCase(); return /^COM\d+$/.test(x)?x:''; };
   const bytes = () => new TextEncoder().encode('\x1b@MK FOODS POS\nBluetooth printer connection test\n\x1b\x64\x04\x1dV\x42\x14');
   const toast = (message,error=false) => { let b=document.getElementById('printerToast'); if(!b){b=document.createElement('div');b.id='printerToast';b.className='workflow-toast';document.body.appendChild(b);} b.textContent=message;b.className=`workflow-toast ${error?'error':'success'}`;b.hidden=false;clearTimeout(b._timer);b._timer=setTimeout(()=>b.hidden=true,5000); };
+  const isNiimbot = name => /b11|niimbot/i.test(String(name || ''));
 
   let recovering = false;
   let recoveryTimer = null;
   let recoveryDone = false;
 
-  const isNiimbot = name => /b11|niimbot/i.test(String(name || ''));
-  const saved = settings => ({
-    name: String(settings?.printerName || '').trim(),
-    route: String(settings?.printerConnection || 'windows-raw'),
-    mac: mac(settings?.printerMac),
-    com: com(settings?.printerComPort)
-  });
-
   async function discoverBluetooth() {
-    try {
-      const r = await window.mkFoods?.discoverBluetooth?.();
-      return Array.isArray(r?.devices) ? r.devices : [];
-    } catch { return []; }
+    try { const r=await window.mkFoods?.discoverBluetooth?.(); return Array.isArray(r?.devices)?r.devices:[]; }
+    catch { return []; }
   }
-
   async function discoverWindows() {
-    try {
-      const r = await window.mkFoods?.discoverPrinters?.();
-      return Array.isArray(r) ? r : (Array.isArray(r?.printers) ? r.printers : []);
-    } catch { return []; }
+    try { const r=await window.mkFoods?.discoverPrinters?.(); return Array.isArray(r)?r:(Array.isArray(r?.printers)?r.printers:[]); }
+    catch { return []; }
   }
-
-  const exactBluetooth = (list, target) => list.find(d => {
-    const dm = mac(d?.mac);
-    const dc = com(d?.comPort);
-    return (target.mac && dm === target.mac) || (target.com && dc === target.com) ||
-      (target.name && String(d?.name || '').trim().toLowerCase() === target.name.toLowerCase());
+  const exactBluetooth = (list,target) => list.find(d => {
+    const dm=mac(d?.mac), dc=com(d?.comPort), dn=String(d?.name||'').trim().toLowerCase();
+    return (target.mac&&dm===target.mac)||(target.com&&dc===target.com)||(target.name&&dn===target.name.toLowerCase());
   });
-
-  const exactWindows = (list, name) => list.find(p => String(p?.name || '').trim().toLowerCase() === name.toLowerCase()) ||
-    list.find(p => String(p?.name || '').toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(String(p?.name || '').toLowerCase()));
+  const exactWindows = (list,name) => list.find(p=>String(p?.name||'').trim().toLowerCase()===name.toLowerCase()) ||
+    list.find(p=>String(p?.name||'').toLowerCase().includes(name.toLowerCase())||name.toLowerCase().includes(String(p?.name||'').toLowerCase()));
 
   async function restoreSavedPrinter() {
     if (recovering || recoveryDone || !window.mkFoods?.snapshot) return false;
-    recovering = true;
+    recovering=true;
     try {
-      const snapshot = await window.mkFoods.snapshot();
-      const target = saved(snapshot?.settings || {});
-      if (!target.name || isNiimbot(target.name)) { recoveryDone = true; return false; }
+      const snapshot=await window.mkFoods.snapshot();
+      const s=snapshot?.settings||{};
+      const name=String(s.printerName||'').trim();
+      if(!name){recoveryDone=true;return false;}
+      if(isNiimbot(name)) return false; // niimbot-bridge owns BLE auto-reconnect
+      const route=String(s.printerConnection||'windows-raw');
+      const target={name,mac:mac(s.printerMac),com:com(s.printerComPort)};
 
-      if (target.route === 'windows-raw' || target.route === 'network-raw') {
-        const printers = await discoverWindows();
-        const match = exactWindows(printers, target.name);
-        if (match?.name) {
-          await window.mkFoods.connectPrinter(match.name).catch(() => null);
-          recoveryDone = true;
+      if(route==='windows-raw'||route==='network-raw'){
+        const match=exactWindows(await discoverWindows(),name);
+        if(match?.name){
+          await window.mkFoods.connectPrinter(match.name).catch(()=>null);
+          recoveryDone=true;
           return true;
         }
       }
 
-      const devices = await discoverBluetooth();
-      const device = exactBluetooth(devices, target);
-      if (!device) return false;
-
-      const dm = mac(device.mac) || target.mac;
-      const dc = com(device.comPort) || target.com;
-      const preferred = target.route === 'bluetooth-com' && dc ? 'bluetooth-com' :
-        (dc ? 'bluetooth-com' : (dm ? 'bluetooth-spp' : 'windows-spooler'));
-
-      if (preferred === 'bluetooth-com') {
-        await window.mkFoods.updateSettings({
-          printerName: target.name,
-          printerMac: dm,
-          printerComPort: dc,
-          printerConnection: 'bluetooth-com',
-          receiptPrinter: target.name
-        });
-      } else if (preferred === 'bluetooth-spp') {
-        await window.mkFoods.updateSettings({
-          printerName: target.name,
-          printerMac: dm,
-          printerComPort: dc,
-          printerConnection: 'bluetooth-spp',
-          receiptPrinter: target.name
-        });
+      const device=exactBluetooth(await discoverBluetooth(),target);
+      if(!device) return false;
+      const dm=mac(device.mac)||target.mac;
+      const dc=com(device.comPort)||target.com;
+      const nextRoute=dc?'bluetooth-com':(dm?'bluetooth-spp':route);
+      if(nextRoute==='bluetooth-com'||nextRoute==='bluetooth-spp'){
+        await window.mkFoods.updateSettings({printerName:name,printerMac:dm,printerComPort:dc,printerConnection:nextRoute,receiptPrinter:name});
+        recoveryDone=true;
+        return true;
       }
-      recoveryDone = true;
-      return true;
-    } catch {
       return false;
-    } finally {
-      recovering = false;
-    }
+    } catch { return false; }
+    finally { recovering=false; }
   }
 
-  function scheduleRecovery() {
+  function scheduleRecovery(){
     clearTimeout(recoveryTimer);
-    recoveryTimer = setTimeout(async () => {
-      const ok = await restoreSavedPrinter();
-      if (!ok && !recoveryDone) scheduleRecovery();
-    }, 1200);
+    recoveryTimer=setTimeout(async()=>{const ok=await restoreSavedPrinter();if(!ok&&!recoveryDone)scheduleRecovery();},1200);
   }
 
-  const discoverComForMac = async target => {
-    const wanted=mac(target); if(!wanted || !window.mkFoods?.discoverBluetooth) return '';
-    const list=await discoverBluetooth();
-    const exact=list.find(d=>mac(d?.mac)===wanted && com(d?.comPort));
-    return exact ? com(exact.comPort) : '';
+  const discoverComForMac=async target=>{
+    const wanted=mac(target);if(!wanted)return '';
+    const exact=(await discoverBluetooth()).find(d=>mac(d?.mac)===wanted&&com(d?.comPort));
+    return exact?com(exact.comPort):'';
   };
 
-  const original = window.selectBluetoothPrinter;
-  window.selectBluetoothPrinter = async device => {
+  window.selectBluetoothPrinter=async device=>{
     const name=String(device?.name||'Bluetooth thermal printer').trim();
     const m=mac(device?.mac);
     let port=com(device?.comPort);
-    if(!port && m) port=await discoverComForMac(m);
+    if(!port&&m)port=await discoverComForMac(m);
 
-    // COM is the preferred Windows transport when SPP exposes it. This avoids
-    // the common RFCOMM 10049 failure while preserving the existing fallback.
-    if(port && window.mkFoods?.printThermal){
-      try {
+    // Dedicated Niimbot BLE path. Do not force B11 through SPP/RFCOMM.
+    if(isNiimbot(name)&&window.mkFoodsNiimbot?.connectAndSave){
+      try{
+        const r=await window.mkFoodsNiimbot.connectAndSave(name,m);
+        if(r!==false){recoveryDone=true;toast(`${name} connected through Bluetooth LE.`);return true;}
+      }catch(e){toast(`${name}: ${e?.message||e}`,true);return false;}
+    }
+
+    const failures=[];
+    const save=async(route,comPort='')=>{
+      const r=await window.mkFoods.updateSettings({printerName:name,printerMac:m,printerComPort:comPort,printerConnection:route,receiptPrinter:name});
+      if(r?.ok===false)throw new Error(r.reason||'Could not save printer selection.');
+    };
+
+    // 1) Windows Bluetooth SPP virtual COM: most reliable Windows fallback.
+    if(port&&window.mkFoods?.printThermal){
+      try{
         const r=await window.mkFoods.printThermal(`__BLUETOOTH_COM__|${port}`,bytes());
-        if(r?.ok!==false){
-          const saved=await window.mkFoods.updateSettings({printerName:name,printerMac:m,printerComPort:port,printerConnection:'bluetooth-com',receiptPrinter:name});
-          if(saved?.ok===false) throw new Error(saved.reason||'Could not save Bluetooth printer.');
-          toast(`${name} connected through Windows Bluetooth SPP ${port}. Direct RFCOMM was bypassed.`);
-          recoveryDone = true;
-          return true;
-        }
-      } catch (_) {}
+        if(r?.ok!==false){await save('bluetooth-com',port);recoveryDone=true;toast(`${name} connected through Bluetooth SPP ${port}.`);return true;}
+        failures.push(`SPP COM ${port}: ${r?.reason||'failed'}`);
+      }catch(e){failures.push(`SPP COM ${port}: ${e?.message||e}`);}
     }
-    if(typeof original==='function') {
-      const ok = await original({...device,mac:m,comPort:port});
-      if (ok) recoveryDone = true;
-      return ok;
+
+    // 2) Direct RFCOMM/SPP by MAC. This is a fallback, not the first route.
+    if(m&&window.mkFoods?.printThermal){
+      try{
+        const r=await window.mkFoods.printThermal(`__BLUETOOTH_RAW__|${m}`,bytes());
+        if(r?.ok!==false){await save('bluetooth-spp','');recoveryDone=true;toast(`${name} connected through direct Bluetooth SPP.`);return true;}
+        failures.push(`Direct SPP: ${r?.reason||'failed'}`);
+      }catch(e){failures.push(`Direct SPP: ${e?.message||e}`);}
     }
-    toast(`${name}: Bluetooth connection handler is unavailable.`,true);
+
+    // 3) Windows printer queue. This is useful when Bluetooth is paired as a
+    // normal Windows printer and avoids direct RFCOMM entirely.
+    try{
+      const match=exactWindows(await discoverWindows(),name);
+      if(match?.name&&window.mkFoods?.printThermal){
+        const r=await window.mkFoods.printThermal(match.name,bytes());
+        if(r?.ok!==false){await save('windows-raw',port);recoveryDone=true;toast(`${name} connected through Windows printer queue.`);return true;}
+        failures.push(`Windows Queue: ${r?.reason||'failed'}`);
+      }else failures.push('Windows Queue: printer not found');
+    }catch(e){failures.push(`Windows Queue: ${e?.message||e}`);}
+
+    toast(`${name} could not connect. ${failures.join(' | ')}`,true);
     return false;
   };
 
-  window.bluetoothRecovery={discoverComForMac, restoreSavedPrinter};
+  window.bluetoothRecovery={discoverComForMac,restoreSavedPrinter};
 
-  // Restore the saved printer after the authenticated POS session becomes
-  // available. Retry quietly so a powered-off printer never creates a red
-  // error toast on launch; printing itself still reports real failures.
-  const boot = () => scheduleRecovery();
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, {once:true});
-  else boot();
-  setInterval(() => { if (!recoveryDone) scheduleRecovery(); }, 10000);
+  // Restore the saved route after the authenticated POS session becomes
+  // available. This is deliberately silent when the printer is powered off.
+  const boot=()=>scheduleRecovery();
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+  setInterval(()=>{if(!recoveryDone)scheduleRecovery();},10000);
 })();
