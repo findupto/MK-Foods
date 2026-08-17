@@ -3,25 +3,20 @@
   "productName": "MK Foods POS",
   "version": "2.2.0",
   "identifier": "pk.mkfoods.pos",
-  "build": {
-    "frontendDist": "../src/renderer"
-  },
+  "build": {"frontendDist": "../src/renderer"},
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "MK Foods POS",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 1100,
-        "minHeight": 700,
-        "resizable": true
-      }
-    ],
-    "security": {
-      "csp": null
-    }
+    "windows": [{
+      "label": "main",
+      "title": "MK Foods POS",
+      "width": 1440,
+      "height": 900,
+      "minWidth": 900,
+      "minHeight": 600,
+      "resizable": true,
+      "center": true
+    }],
+    "security": {"csp": null}
   },
   "bundle": {
     "active": true,
@@ -32,10 +27,7 @@
     "longDescription": "MK Foods offline-first point of sale application.",
     "icon": ["icons/icon.ico"],
     "windows": {
-      "webviewInstallMode": {
-        "type": "embedBootstrapper",
-        "silent": true
-      },
+      "webviewInstallMode": {"type": "embedBootstrapper", "silent": true},
       "nsis": {
         "installMode": "perMachine",
         "startMenuFolder": "MK Foods POS",
@@ -45,7 +37,5 @@
       }
     }
   },
-  "plugins": {
-    "dialog": null
-  }
+  "plugins": {"dialog": null}
 }
