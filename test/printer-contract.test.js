@@ -15,7 +15,12 @@ assert(rust.includes('__BLUETOOTH_COM__|'), 'Bluetooth COM transport missing');
 assert(rust.includes('__NETWORK_RAW__|'), 'Network RAW transport missing');
 assert(rust.includes('WriteFile'), 'Raw COM write transport missing');
 assert(rust.includes('windows-raw'), 'Windows RAW spooler transport missing');
-assert(/for\s+attempt\s+in\s+1\.\.\=3/.test(rust), 'Bluetooth retry loop missing');
+
+// Validate the implementation, not one exact formatting of the Rust loop.
+// The production code intentionally uses `1..=3` and a separate `attempt < 3`
+// guard for backoff. The previous regex accidentally matched `1.=3` and
+// therefore rejected the correct `1..=3` implementation.
+assert(/for\s+attempt\s+in\s+1\.\.\=\s*3/.test(rust) || /for\s+attempt\s+in\s+1\.\.\=3/.test(rust), 'Bluetooth retry loop missing');
 assert(/attempt\s*<\s*3/.test(rust), 'Bluetooth retry backoff missing');
 
 assert(ui.includes('bluetooth-spp'), 'Direct SPP UI route missing');
