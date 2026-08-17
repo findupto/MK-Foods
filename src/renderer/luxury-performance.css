@@ -1,0 +1,57 @@
+:root{
+  --lux-bg:#f4f6f8;
+  --lux-surface:#ffffff;
+  --lux-surface-2:#f8fafb;
+  --lux-border:rgba(16,24,40,.10);
+  --lux-text:#101828;
+  --lux-muted:#667085;
+  --lux-brand:#0b6b43;
+  --lux-brand-2:#18a36b;
+  --lux-shadow:0 1px 2px rgba(16,24,40,.04),0 14px 34px rgba(16,24,40,.06);
+}
+html{background:var(--lux-bg);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+body{background:radial-gradient(circle at 80% -20%,rgba(24,163,107,.08),transparent 34%),var(--lux-bg);color:var(--lux-text)}
+.top{background:rgba(255,255,255,.96)!important;backdrop-filter:saturate(140%) blur(12px);-webkit-backdrop-filter:saturate(140%) blur(12px);box-shadow:0 1px 0 var(--lux-border),0 8px 28px rgba(16,24,40,.045)!important}
+.top>div:first-child b{font-size:20px!important;letter-spacing:-.045em}
+.app>nav{box-shadow:inset -1px 0 var(--lux-border),4px 0 24px rgba(16,24,40,.04)!important}
+.app>nav button{transition:background .12s ease,color .12s ease,transform .12s ease!important;will-change:background}
+.app>nav button:hover{transform:translateX(2px)!important}
+.app main{contain:layout paint;scroll-behavior:smooth}
+.head h1{font-weight:800!important;letter-spacing:-.045em!important}
+.panel,.card,.table,.ticket,.print-statusbar,.print-quickbar,.workflow-board-head,.workflow-order-card{box-shadow:var(--lux-shadow)!important;border-color:var(--lux-border)!important}
+.panel,.card{background:linear-gradient(180deg,#fff,#fcfdfd)!important}
+.btn{background:linear-gradient(135deg,var(--lux-brand),var(--lux-brand-2))!important;border:0!important;transition:transform .12s ease,box-shadow .12s ease,filter .12s ease!important}
+.btn:hover{filter:saturate(1.06);transform:translateY(-1px)}
+.field{transition:border-color .12s ease,box-shadow .12s ease!important}
+.field:focus{border-color:#19a56a!important;box-shadow:0 0 0 3px rgba(24,163,107,.12)!important}
+.product{transition:transform .10s ease,border-color .10s ease,box-shadow .10s ease!important;will-change:transform}
+.product:hover{transform:translateY(-2px)!important}
+.card strong,.ec-metric strong{font-variant-numeric:tabular-nums}
+.list{font-variant-numeric:tabular-nums}
+.list tbody tr{transition:background .08s ease}
+.list tbody tr:hover{background:#f7fbf9}
+.status,.tag,.workflow-stage,.ec-pill{white-space:nowrap}
+.empty-state{background:linear-gradient(180deg,#fff,#fafcfb)!important}
+.workflow-toast,.mk-modern-toast{box-shadow:0 16px 44px rgba(16,24,40,.18)!important}
+.detail-dialog,.workflow-dialog,.mk-form-window{box-shadow:-20px 0 60px rgba(16,24,40,.14)!important}
+/* Keep large dynamic screens cheap to paint. */
+.kitchen,.productgrid,.workflow-board{contain:layout style}
+.kitchen .ticket,.productgrid .product{content-visibility:auto;contain-intrinsic-size:110px}
+@media(max-width:1050px){
+  .app{grid-template-columns:76px minmax(0,1fr)!important}
+  .app nav .nav-label,.app nav button span,.mk-sidebar-brand div:not(.mark),.mk-sidebar-foot{display:none}
+  .app nav button{justify-content:center}
+  .app main{padding:20px!important}
+}
+@media(max-width:760px){
+  .top{height:62px!important;padding:0 14px!important}
+  .app{height:calc(100vh - 62px)!important;display:flex!important;flex-direction:column!important}
+  .app>nav{order:2;height:58px;display:flex;overflow-x:auto;overflow-y:hidden;box-shadow:0 -1px 0 var(--lux-border)!important}
+  .app>nav button{min-width:54px;width:auto!important;justify-content:center}
+  .app main{height:calc(100vh - 120px)!important;padding:14px!important}
+  .head{align-items:flex-start!important;flex-direction:column}
+  .head h1{font-size:24px!important}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
+}
