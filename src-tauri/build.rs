@@ -37,11 +37,56 @@ fn main() {
 fn strip_command(src: &str, name: &str) -> String {
     let marker = format!("#[tauri::command]fn {name}(");
     let Some(start) = src.find(&marker) else { return src.to_string(); };
-    let body_start = start + marker.len();
-    let Some(end_rel) = src[body_start..].find("}\n") else { return src.to_string(); };
-    let end = body_start + end_rel + 2;
-    let mut out = String::with_capacity(src.len());
-    out.push_str(&src[..start]);
-    out.push_str(&src[end..]);
-    out
+
+    // The command bodies in this project are minified onto a single line and
+    // can contain nested blocks. Looking for the first `}\n` is therefore
+    // unsafe: it may fail to match at all or remove the wrong command. Find
+    // the opening brace and scan balanced braces instead, while ignoring
+    // braces inside string literals.
+    let Some(body_start) = src[start + marker.len()..].find('{')
+        .map(|offset| start + marker.len() + offset)
+    else {
+        return src.to_string();
+    };
+
+    let bytes = src.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut i = body_start;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+        } else {
+            match b {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        let mut end = i + 1;
+                        if end < bytes.len() && bytes[end] == b'\n' {
+                            end += 1;
+                        }
+                        let mut out = String::with_capacity(src.len() - (end - start));
+                        out.push_str(&src[..start]);
+                        out.push_str(&src[end..]);
+                        return out;
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+
+    src.to_string()
 }
