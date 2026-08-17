@@ -14,6 +14,13 @@ use std::sync::Mutex;
 #[repr(C)] struct DocInfo1 { doc_name: *const u16, output_file: *const u16, data_type: *const u16 }
 
 #[cfg(windows)]
+#[repr(C)] struct PrinterInfo4W {
+    p_printer_name: *mut u16,
+    p_server_name: *mut u16,
+    attributes: u32,
+}
+
+#[cfg(windows)]
 #[link(name = "winspool")]
 extern "system" {
     fn OpenPrinterW(name: *mut u16, handle: *mut Handle, defaults: *mut c_void) -> i32;
@@ -23,6 +30,7 @@ extern "system" {
     fn StartPagePrinter(handle: Handle) -> i32;
     fn EndPagePrinter(handle: Handle) -> i32;
     fn WritePrinter(handle: Handle, bytes: *const c_void, count: u32, written: *mut u32) -> i32;
+    fn EnumPrintersW(flags: u32, name: *mut u16, level: u32, buffer: *mut u8, buffer_size: u32, needed: *mut u32, returned: *mut u32) -> i32;
 }
 
 #[cfg(windows)] const GENERIC_WRITE: u32 = 0x40000000;
@@ -30,10 +38,53 @@ extern "system" {
 #[cfg(windows)] const FILE_SHARE_WRITE: u32 = 2;
 #[cfg(windows)] const OPEN_EXISTING: u32 = 3;
 #[cfg(windows)] const INVALID_HANDLE_VALUE: Handle = (-1isize) as Handle;
+#[cfg(windows)] const PRINTER_ENUM_LOCAL: u32 = 2;
+#[cfg(windows)] const PRINTER_ENUM_CONNECTIONS: u32 = 4;
 
 #[cfg(windows)] fn wide(s: &str) -> Vec<u16> {
     std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
 }
+
+#[cfg(windows)] unsafe fn wide_ptr_string(p: *const u16) -> String {
+    if p.is_null() { return String::new(); }
+    let mut n = 0usize;
+    while *p.add(n) != 0 { n += 1; }
+    String::from_utf16_lossy(std::slice::from_raw_parts(p, n))
+}
+
+#[cfg(windows)] fn enumerate_windows_printers() -> Result<Vec<Value>, String> {
+    let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+    let mut needed = 0u32;
+    let mut returned = 0u32;
+    let first = unsafe { EnumPrintersW(flags, std::ptr::null_mut(), 4, std::ptr::null_mut(), 0, &mut needed, &mut returned) };
+    if first != 0 || needed == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buffer = vec![0u8; needed as usize];
+    let ok = unsafe { EnumPrintersW(flags, std::ptr::null_mut(), 4, buffer.as_mut_ptr(), buffer.len() as u32, &mut needed, &mut returned) };
+    if ok == 0 {
+        return Err(format!("PRINTER_ENUMERATION_FAILED: {}", std::io::Error::last_os_error()));
+    }
+    let stride = std::mem::size_of::<PrinterInfo4W>();
+    let mut printers = Vec::with_capacity(returned as usize);
+    for i in 0..returned as usize {
+        let ptr = unsafe { buffer.as_ptr().add(i * stride) as *const PrinterInfo4W };
+        let info = unsafe { &*ptr };
+        let name = unsafe { wide_ptr_string(info.p_printer_name) };
+        if name.trim().is_empty() { continue; }
+        printers.push(json!({
+            "name": name,
+            "default": false,
+            "status": 0,
+            "attributes": info.attributes,
+            "connection": "windows-spooler",
+            "discoveryMethod": "EnumPrintersW"
+        }));
+    }
+    Ok(printers)
+}
+
+#[cfg(not(windows))] fn enumerate_windows_printers() -> Result<Vec<Value>, String> { Ok(Vec::new()) }
 
 #[cfg(windows)] fn normalize_mac(v: &str) -> String {
     let h:String=v.chars().filter(|c|c.is_ascii_hexdigit()).collect();
@@ -107,10 +158,18 @@ fn print_network_raw(target:&str,data:&[u8])->Result<u32,String>{if data.is_empt
 fn require_session(state:&State<Mutex<AppState>>,window:&WebviewWindow)->Result<(),String>{let mut app=state.lock().map_err(|_|"PRINTER_LOCK_FAILED".to_string())?;ensure(&mut app,window,Some(&["Admin","Owner","Manager","Cashier","Counter Person","Waiter","Kitchen Staff","Kitchen","Rider"]))?;Ok(())}
 
 #[tauri::command]
+pub fn discover_printers(window:WebviewWindow,state:State<Mutex<AppState>>)->Result<Value,String>{
+    let mut app=state.lock().map_err(|_|"PRINTER_LOCK_FAILED".to_string())?;
+    ensure(&mut app,&window,Some(&["Admin","Owner","Manager","Cashier","Counter Person"]))?;
+    drop(app);
+    Ok(json!(enumerate_windows_printers()?))
+}
+
+#[tauri::command]
 pub fn print_thermal(window:WebviewWindow,state:State<Mutex<AppState>>,printer:String,data:Vec<u8>)->Result<Value,String>{
     require_session(&state,&window)?;
     if printer=="__BLUETOOTH_DISCOVER__" { return Ok(json!({"ok":true,"devices":enumerate_bluetooth_devices()?})); }
-    if printer=="__DISCOVER__" { return Ok(json!({"ok":true,"printers":[]})); }
+    if printer=="__DISCOVER__" { return Ok(json!({"ok":true,"printers":enumerate_windows_printers()?})); }
     if printer.starts_with("__BLUETOOTH_RAW__|") { let mac=printer.split_once('|').map(|(_,v)|v).unwrap_or(""); let written=print_bluetooth_spp(mac,&data)?; return Ok(json!({"ok":true,"written":written,"route":"bluetooth-spp"})); }
     if printer.starts_with("__BLUETOOTH_COM__|") { let com=printer.split_once('|').map(|(_,v)|v).unwrap_or(""); let written=print_bluetooth_com(com,&data)?; return Ok(json!({"ok":true,"written":written,"route":"bluetooth-com"})); }
     if printer.starts_with("__NETWORK_RAW__|") { let target=printer.split_once('|').map(|(_,v)|v).unwrap_or(""); let written=print_network_raw(target,&data)?; return Ok(json!({"ok":true,"written":written,"route":"network-raw"})); }
