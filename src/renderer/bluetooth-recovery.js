@@ -37,7 +37,7 @@
       const s=snapshot?.settings||{};
       const name=String(s.printerName||'').trim();
       if(!name){recoveryDone=true;return false;}
-      if(isNiimbot(name)) return false; // niimbot-bridge owns BLE auto-reconnect
+      if(isNiimbot(name)){recoveryDone=true;return false;} // niimbot-bridge owns BLE auto-reconnect
       const route=String(s.printerConnection||'windows-raw');
       const target={name,mac:mac(s.printerMac),com:com(s.printerComPort)};
 
