@@ -38,9 +38,7 @@
       const originalRequest = navigator.bluetooth.requestDevice.bind(navigator.bluetooth);
       navigator.bluetooth.requestDevice = async options => device || originalRequest(options);
       try {
-        if (client) {
-          try { await client.disconnect(); } catch (_) {}
-        }
+        if (client) { try { await client.disconnect(); } catch (_) {} }
         client = new Ctor();
         client.setServiceUuidFilter?.([SERVICE]);
         await client.connect();
@@ -51,11 +49,7 @@
       }
     })();
 
-    try {
-      return await connectPromise;
-    } finally {
-      connectPromise = null;
-    }
+    try { return await connectPromise; } finally { connectPromise = null; }
   }
 
   function wrapLines(text, maxChars) {
@@ -79,9 +73,8 @@
     for (const item of order.items || []) {
       const qty = Number(item.qty || 0);
       const price = Number(item.price || 0);
-      const total = qty * price;
       lines.push(`${qty} x ${item.name || ''}`);
-      lines.push(`  ${price.toFixed(2)} x ${qty} = ${total.toFixed(2)}`);
+      lines.push(`  ${price.toFixed(2)} x ${qty} = ${(qty * price).toFixed(2)}`);
     }
     lines.push('--------------------------------');
     lines.push(`TOTAL: ${Number(order.total || 0).toFixed(2)}`);
@@ -95,16 +88,12 @@
     const width = 384;
     const lineHeight = 18;
     const lines = orderLines(order);
-    const height = Math.max(120, lines.length * lineHeight + 28);
     const canvas = document.createElement('canvas');
     canvas.width = width;
-    canvas.height = height;
+    canvas.height = Math.max(120, lines.length * lineHeight + 28);
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = '#000';
-    ctx.font = '15px Consolas, "Courier New", monospace';
-    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, canvas.height);
+    ctx.fillStyle = '#000'; ctx.font = '15px Consolas, "Courier New", monospace'; ctx.textBaseline = 'top';
     lines.forEach((line, i) => ctx.fillText(line, 8, 10 + i * lineHeight));
     return canvas;
   }
@@ -116,14 +105,16 @@
     const api = lib();
     const encoder = api.ImageEncoder;
     if (!encoder) throw new Error('NIIMBOT_IMAGE_ENCODER_UNAVAILABLE');
-    const canvas = renderOrderCanvas(order);
-    const encoded = encoder.encodeCanvas(canvas, 'top');
-    const taskName = c.getPrintTaskType?.();
-    if (!taskName) throw new Error('NIIMBOT_B11_PRINT_TASK_UNAVAILABLE');
+    const encoded = encoder.encodeCanvas(renderOrderCanvas(order), 'top');
+    const info = c.getPrinterInfo?.() || {};
+    const taskName = c.getPrintTaskType?.() || (Number(info.modelId) === 51457 ? 'B1' : undefined);
+    if (!taskName) throw new Error(`NIIMBOT_PRINT_TASK_UNAVAILABLE: model ${info.modelId ?? 'unknown'}`);
     const task = c.abstraction.newPrintTask(taskName, {
       totalPages: 1,
-      statusPollIntervalMs: 100,
-      statusTimeoutMs: 15000
+      density: 10,
+      statusPollIntervalMs: 150,
+      statusTimeoutMs: 20000,
+      pageTimeoutMs: 15000
     });
     await task.printInit();
     try {
@@ -132,7 +123,7 @@
     } finally {
       try { await c.abstraction.printEnd(); } catch (_) {}
     }
-    return { ok: true, route: 'bluetooth-niimbot-ble', printer: name };
+    return { ok: true, route: 'bluetooth-niimbot-ble', printer: name, modelId: info.modelId };
   }
 
   async function connectAndSave(name, mac) {
@@ -151,14 +142,9 @@
   function markPrinted(id) {
     try {
       const rows = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
-      const updated = rows.map(x => x.id === id ? {
-        ...x,
-        printStatus: 'printed',
-        printError: '',
-        printedAt: new Date().toISOString(),
-        printRoute: 'bluetooth-niimbot-ble'
-      } : x);
-      localStorage.setItem(QUEUE_KEY, JSON.stringify(updated));
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(rows.map(x => x.id === id ? {
+        ...x, printStatus: 'printed', printError: '', printedAt: new Date().toISOString(), printRoute: 'bluetooth-niimbot-ble'
+      } : x)));
       window.refreshPrintManager?.();
     } catch (_) {}
   }
@@ -173,10 +159,7 @@
       window.toast?.(`${id} printed on ${window.db?.settings?.printerName || 'Niimbot B11'} via Bluetooth LE.`);
     } catch (e) {
       const message = String(e?.message || e || 'NIIMBOT_PRINT_FAILED');
-      try {
-        const next = rows.map(x => x.id === id ? { ...x, printStatus: 'error', printError: message } : x);
-        localStorage.setItem(QUEUE_KEY, JSON.stringify(next));
-      } catch (_) {}
+      try { localStorage.setItem(QUEUE_KEY, JSON.stringify(rows.map(x => x.id === id ? { ...x, printStatus: 'error', printError: message } : x))); } catch (_) {}
       window.toast?.(message, true);
     }
   }
@@ -185,21 +168,24 @@
     try {
       const snapshot = await window.mkFoods.snapshot();
       const settings = snapshot?.settings || {};
-      if (!isB11(settings.printerName) || settings.printerConnection !== 'bluetooth-niimbot-ble') return;
+      if (!isB11(settings.printerName)) return;
       await connect(settings.printerName, false);
+      if (settings.printerConnection !== 'bluetooth-niimbot-ble') {
+        await window.mkFoods.updateSettings({
+          printerName: settings.printerName,
+          receiptPrinter: settings.printerName,
+          printerMac: settings.printerMac || '',
+          printerComPort: '',
+          printerConnection: 'bluetooth-niimbot-ble'
+        });
+      }
       console.log(`[MK Foods] Auto-reconnected Niimbot B11: ${settings.printerName}`);
     } catch (e) {
       console.info('[MK Foods] Niimbot auto-reconnect deferred:', String(e?.message || e));
     }
   }
 
-  window.mkFoodsNiimbot = {
-    isSupported: supported,
-    connect: name => connect(name, true),
-    connectAndSave,
-    printOrder,
-    autoReconnect
-  };
+  window.mkFoodsNiimbot = { isSupported: supported, connect: name => connect(name, true), connectAndSave, printOrder, autoReconnect };
 
   const originalBluetooth = window.pcUseBluetooth;
   window.pcUseBluetooth = async (name, mac, com, method) => {
@@ -219,9 +205,7 @@
   const originalPassPrintJob = window.passPrintJob;
   const wrappedPrint = async id => {
     const name = String(window.db?.settings?.printerName || '');
-    if (isB11(name) && window.db?.settings?.printerConnection === 'bluetooth-niimbot-ble') {
-      return printQueued(id);
-    }
+    if (isB11(name)) return printQueued(id);
     return originalPassPrintJob?.(id);
   };
   window.passPrintJob = wrappedPrint;
