@@ -100,3 +100,16 @@ pub fn print_thermal(window:WebviewWindow,state:State<Mutex<AppState>>,printer:S
     #[cfg(windows)] { let written=unsafe{print_windows_raw(&printer,&data)?}; return Ok(json!({"ok":true,"written":written,"route":"windows-raw","printer":printer})); }
     #[cfg(not(windows))] { Err("WINDOWS_PRINTER_ONLY".into()) }
 }
+
+// The application keeps the Windows spooler commands in main.rs for backwards
+// compatibility with the existing renderer contract. Tauri's generate_handler!
+// resolves the generated command glue relative to the path used in the macro.
+// Re-export both the command and its generated glue so the existing
+// `printer::discover_printers` / `printer::connect_printer` registrations remain
+// valid without creating duplicate command implementations or invoke names.
+pub(crate) use crate::discover_printers;
+pub(crate) use crate::connect_printer;
+pub(crate) use crate::__cmd__discover_printers;
+pub(crate) use crate::__cmd__connect_printer;
+pub(crate) use crate::__tauri_command_name_discover_printers;
+pub(crate) use crate::__tauri_command_name_connect_printer;
