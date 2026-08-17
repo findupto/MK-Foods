@@ -1,4 +1,7 @@
 use std::ffi::c_void;
+use std::io::Write;
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{State, WebviewWindow};
 use crate::{ensure, AppState};
@@ -104,15 +107,12 @@ fn bluetooth_mac_from_instance(instance: &str) -> String {
 #[cfg(windows)]
 fn likely_thermal_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    ["printer", "pos", "receipt", "thermal", "esc", "epson", "xprinter", "rongta", "zebra", "bixolon", "gprinter", "goojprt", "munbyn", "sunmi"].iter().any(|x| n.contains(x))
+    ["printer","pos","receipt","thermal","esc","epson","xprinter","rongta","zebra","bixolon","gprinter","goojprt","munbyn","sunmi"].iter().any(|x| n.contains(x))
 }
 
 #[cfg(windows)]
 fn enumerate_bluetooth_devices() -> Result<Vec<Value>, String> {
     use std::process::Command;
-    // Discovery intentionally combines independent Windows surfaces. A paired
-    // printer may be visible as BTHENUM, as a Bluetooth/Ports PnP node, or only
-    // as a virtual COM port created by the Bluetooth SPP service.
     let script = r#"
 $ErrorActionPreference='SilentlyContinue'
 $rows=@()
@@ -125,7 +125,8 @@ $rows += @(Get-CimInstance Win32_PnPEntity | Where-Object {
 $ports=@(Get-CimInstance Win32_SerialPort | Where-Object {$_.DeviceID} | Select-Object DeviceID,Name,Status,PNPDeviceID)
 [PSCustomObject]@{devices=$rows;ports=$ports} | ConvertTo-Json -Compress -Depth 5
 "#;
-    let out = Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",script]).output().map_err(|e| format!("BLUETOOTH_ENUMERATION_FAILED: {e}"))?;
+    let out = Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-Command",script]).output()
+        .map_err(|e| format!("BLUETOOTH_ENUMERATION_FAILED: {e}"))?;
     if !out.status.success() { return Err("BLUETOOTH_ENUMERATION_FAILED".into()); }
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() { return Ok(Vec::new()); }
@@ -133,7 +134,6 @@ $ports=@(Get-CimInstance Win32_SerialPort | Where-Object {$_.DeviceID} | Select-
     let device_rows = raw["devices"].as_array().cloned().unwrap_or_default();
     let port_rows = raw["ports"].as_array().cloned().unwrap_or_default();
     let mut result: Vec<Value> = Vec::new();
-
     for x in device_rows {
         let instance = x["InstanceId"].as_str().unwrap_or("");
         let mac = bluetooth_mac_from_instance(instance);
@@ -143,23 +143,8 @@ $ports=@(Get-CimInstance Win32_SerialPort | Where-Object {$_.DeviceID} | Select-
         let class_name = x["ClassName"].as_str().unwrap_or("");
         let duplicate = result.iter().any(|d| d["name"].as_str().unwrap_or("").eq_ignore_ascii_case(name) && d["mac"].as_str().unwrap_or("").eq_ignore_ascii_case(&mac));
         if duplicate { continue; }
-        result.push(json!({
-            "name": name,
-            "status": status,
-            "instanceId": instance,
-            "mac": mac,
-            "class": class_name,
-            "connection": "bluetooth-pnp",
-            "discoveryMethod": "Windows PnP / BTHENUM",
-            "paired": true,
-            "online": status.eq_ignore_ascii_case("OK"),
-            "thermalCandidate": likely_thermal_name(name),
-            "methods": ["bluetooth-spp", "windows-spooler", "bluetooth-com"]
-        }));
+        result.push(json!({"name":name,"status":status,"instanceId":instance,"mac":mac,"class":class_name,"connection":"bluetooth-pnp","discoveryMethod":"Windows PnP / BTHENUM","paired":true,"online":status.eq_ignore_ascii_case("OK"),"thermalCandidate":likely_thermal_name(name),"methods":["bluetooth-spp","windows-spooler","bluetooth-com"]}));
     }
-
-    // SPP printers commonly expose a COM port even when BTHENUM does not yield
-    // a useful friendly device record. Keep these as first-class discoveries.
     for p in port_rows {
         let port = p["DeviceID"].as_str().unwrap_or("").trim();
         let name = p["Name"].as_str().unwrap_or("Bluetooth serial port").trim();
@@ -170,24 +155,11 @@ $ports=@(Get-CimInstance Win32_SerialPort | Where-Object {$_.DeviceID} | Select-
         let mac = bluetooth_mac_from_instance(pnp);
         let duplicate = result.iter().any(|d| d["comPort"].as_str().unwrap_or("").eq_ignore_ascii_case(port));
         if duplicate { continue; }
-        result.push(json!({
-            "name": name,
-            "status": p["Status"].as_str().unwrap_or("Unknown"),
-            "instanceId": pnp,
-            "mac": mac,
-            "comPort": port,
-            "connection": "bluetooth-com",
-            "discoveryMethod": "Windows Bluetooth SPP virtual COM port",
-            "paired": true,
-            "online": p["Status"].as_str().unwrap_or("").eq_ignore_ascii_case("OK"),
-            "thermalCandidate": likely_thermal_name(name),
-            "methods": ["bluetooth-com", "windows-spooler", "bluetooth-spp"]
-        }));
+        result.push(json!({"name":name,"status":p["Status"].as_str().unwrap_or("Unknown"),"instanceId":pnp,"mac":mac,"comPort":port,"connection":"bluetooth-com","discoveryMethod":"Windows Bluetooth SPP virtual COM port","paired":true,"online":p["Status"].as_str().unwrap_or("").eq_ignore_ascii_case("OK"),"thermalCandidate":likely_thermal_name(name),"methods":["bluetooth-com","windows-spooler","bluetooth-spp"]}));
     }
-
     result.sort_by(|a,b| {
-        let aa = format!("{} {}", a["thermalCandidate"].as_bool().unwrap_or(false), a["name"].as_str().unwrap_or(""));
-        let bb = format!("{} {}", b["thermalCandidate"].as_bool().unwrap_or(false), b["name"].as_str().unwrap_or(""));
+        let aa = format!("{} {}",a["thermalCandidate"].as_bool().unwrap_or(false),a["name"].as_str().unwrap_or(""));
+        let bb = format!("{} {}",b["thermalCandidate"].as_bool().unwrap_or(false),b["name"].as_str().unwrap_or(""));
         bb.to_ascii_lowercase().cmp(&aa.to_ascii_lowercase())
     });
     Ok(result)
@@ -220,13 +192,22 @@ fn print_bluetooth_spp(mac:&str,data:&[u8])->Result<u32,String>{
     if startup!=0{return Err(format!("BLUETOOTH_SOCKET_INIT_FAILED: {startup}"));}
     let spp_uuid:[u8;16]=[0x01,0x11,0x00,0x00,0x00,0x00,0x00,0x10,0x80,0x00,0x00,0x80,0x5f,0x9b,0x34,0xfb];
     let addr=SockAddrBth{address_family:32,bt_addr,service_class_id:spp_uuid,port:0};
-    let sock=unsafe{socket(32,1,3)};
-    if sock==usize::MAX{let e=unsafe{WSAGetLastError()};unsafe{WSACleanup()};return Err(format!("BLUETOOTH_SOCKET_FAILED: {e}"));}
-    let connected=unsafe{connect(sock,&addr as *const _ as *const c_void,std::mem::size_of::<SockAddrBth>() as i32)};
-    if connected!=0{let e=unsafe{WSAGetLastError()};unsafe{closesocket(sock);WSACleanup()};return Err(format!("BLUETOOTH_CONNECT_FAILED: {e}"));}
-    let mut sent=0usize;
-    while sent<data.len(){let n=unsafe{send(sock,data[sent..].as_ptr() as *const i8,(data.len()-sent).min(i32::MAX as usize) as i32,0)};if n<=0{let e=unsafe{WSAGetLastError()};unsafe{closesocket(sock);WSACleanup()};return Err(format!("BLUETOOTH_WRITE_FAILED: {e}"));}sent+=n as usize;}
-    unsafe{closesocket(sock);WSACleanup()};Ok(sent as u32)
+    let mut last=String::new();
+    for attempt in 1..=3 {
+        let sock=unsafe{socket(32,1,3)};
+        if sock==usize::MAX { last=format!("socket error {}",unsafe{WSAGetLastError()}); }
+        else {
+            let connected=unsafe{connect(sock,&addr as *const _ as *const c_void,std::mem::size_of::<SockAddrBth>() as i32)};
+            if connected==0 {
+                let mut sent=0usize; let mut failed=false;
+                while sent<data.len() { let n=unsafe{send(sock,data[sent..].as_ptr() as *const i8,(data.len()-sent).min(i32::MAX as usize) as i32,0)}; if n<=0 { last=format!("write error {}",unsafe{WSAGetLastError()}); failed=true; break; } sent+=n as usize; }
+                unsafe{closesocket(sock)};
+                if !failed { unsafe{WSACleanup()}; return Ok(sent as u32); }
+            } else { last=format!("connect error {}",unsafe{WSAGetLastError()}); unsafe{closesocket(sock)}; }
+        }
+        if attempt<3 { std::thread::sleep(std::time::Duration::from_millis(250)); }
+    }
+    unsafe{WSACleanup()}; Err(format!("BLUETOOTH_CONNECT_FAILED: {last}; tried 3 RFCOMM/SPP attempts"))
 }
 
 #[cfg(windows)]
@@ -236,63 +217,45 @@ extern "system" {
     fn WriteFile(handle:Handle,buffer:*const c_void,count:u32,written:*mut u32,overlapped:*mut c_void)->i32;
     fn CloseHandle(handle:Handle)->i32;
 }
-
-#[cfg(windows)]
-const GENERIC_WRITE:u32=0x40000000;
-#[cfg(windows)]
-const FILE_SHARE_READ:u32=0x00000001;
-#[cfg(windows)]
-const FILE_SHARE_WRITE:u32=0x00000002;
-#[cfg(windows)]
-const OPEN_EXISTING:u32=3;
-#[cfg(windows)]
-const INVALID_HANDLE_VALUE:Handle=(-1isize) as Handle;
+#[cfg(windows)] const GENERIC_WRITE:u32=0x40000000;
+#[cfg(windows)] const FILE_SHARE_READ:u32=0x00000001;
+#[cfg(windows)] const FILE_SHARE_WRITE:u32=0x00000002;
+#[cfg(windows)] const OPEN_EXISTING:u32=3;
+#[cfg(windows)] const INVALID_HANDLE_VALUE:Handle=(-1isize) as Handle;
 
 #[cfg(windows)]
 fn print_bluetooth_com(port:&str,data:&[u8])->Result<u32,String>{
-    let port=port.trim();
-    if !port.to_ascii_uppercase().starts_with("COM"){return Err("BLUETOOTH_COM_PORT_INVALID".into());}
-    let path=if port.len()>4{format!(r"\\.\{}",port)}else{format!(r"\\.\{}",port)};
-    let name=wide(&path);
+    let port=port.trim(); if !port.to_ascii_uppercase().starts_with("COM"){return Err("BLUETOOTH_COM_PORT_INVALID".into());}
+    let name=wide(&format!(r"\\.\{}",port));
     let handle=unsafe{CreateFileW(name.as_ptr(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,std::ptr::null_mut(),OPEN_EXISTING,0,std::ptr::null_mut())};
     if handle.is_null()||handle==INVALID_HANDLE_VALUE{return Err(format!("BLUETOOTH_COM_OPEN_FAILED: {}",std::io::Error::last_os_error()));}
-    let mut written=0u32;
-    let ok=unsafe{WriteFile(handle,data.as_ptr() as *const c_void,data.len().try_into().map_err(|_|"PRINT_DATA_TOO_LARGE")?,&mut written,std::ptr::null_mut())};
-    unsafe{CloseHandle(handle)};
-    if ok==0||written!=data.len() as u32{return Err(format!("BLUETOOTH_COM_WRITE_FAILED: {}",std::io::Error::last_os_error()));}
-    Ok(written)
+    let mut written=0u32; let ok=unsafe{WriteFile(handle,data.as_ptr() as *const c_void,data.len().try_into().map_err(|_|"PRINT_DATA_TOO_LARGE")?,&mut written,std::ptr::null_mut())}; unsafe{CloseHandle(handle)};
+    if ok==0||written!=data.len() as u32{return Err(format!("BLUETOOTH_COM_WRITE_FAILED: {}",std::io::Error::last_os_error()));} Ok(written)
+}
+
+fn parse_network_target(target:&str)->Result<(String,u16),String>{
+    let value=target.trim(); let (host,port)=if let Some((h,p))=value.rsplit_once(':'){if p.chars().all(|c|c.is_ascii_digit()){(h.to_string(),p.parse::<u16>().map_err(|_|"NETWORK_PORT_INVALID")?)}else{(value.to_string(),9100)}}else{(value.to_string(),9100)};
+    if host.trim().is_empty(){return Err("NETWORK_HOST_REQUIRED".into())} Ok((host,port))
+}
+fn print_network_raw(target:&str,data:&[u8])->Result<u32,String>{
+    if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())} let (host,port)=parse_network_target(target)?; let mut addrs=(host.as_str(),port).to_socket_addrs().map_err(|e|format!("NETWORK_RESOLVE_FAILED: {e}"))?; let addr=addrs.next().ok_or_else(||"NETWORK_ADDRESS_NOT_FOUND".to_string())?; let mut last=String::new();
+    for attempt in 1..=3 { match TcpStream::connect_timeout(&addr,Duration::from_secs(3)){Ok(mut stream)=>{let _=stream.set_write_timeout(Some(Duration::from_secs(5)));if let Err(e)=stream.write_all(data){last=format!("write error {e}")}else{let _=stream.shutdown(Shutdown::Both);return Ok(data.len() as u32)}},Err(e)=>last=format!("connect error {e}")} if attempt<3{std::thread::sleep(Duration::from_millis(200));} }
+    Err(format!("NETWORK_PRINT_FAILED: {last}; tried 3 RAW/9100 attempts"))
 }
 
 #[tauri::command]
 pub fn print_thermal(w: WebviewWindow, s: State<Mutex<AppState>>, printer: String, data: Vec<u8>) -> Result<Value, String> {
     let mut app=s.lock().map_err(|_|"PRINTER_LOCK_FAILED".to_string())?;
     ensure(&mut app,&w,Some(&["Admin","Owner","Manager","Cashier","Counter Person","Waiter","Kitchen Staff","Kitchen","Rider"]))?;
-    if printer=="__DISCOVER__"{
-        #[cfg(windows)] unsafe{return Ok(json!({"ok":true,"printers":enumerate_printers()?}));}
-        #[cfg(not(windows))]{return Ok(json!({"ok":true,"printers":[]}));}
-    }
-    if printer=="__BLUETOOTH_DISCOVER__"{
-        #[cfg(windows)]{return Ok(json!({"ok":true,"devices":enumerate_bluetooth_devices()?}));}
-        #[cfg(not(windows))]{return Ok(json!({"ok":true,"devices":[]}));}
-    }
-    // Direct Bluetooth Classic / RFCOMM SPP.
-    if let Some(mac)=printer.strip_prefix("__BLUETOOTH_RAW__|"){
-        if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())}
-        #[cfg(windows)]{let written=print_bluetooth_spp(mac,&data)?;return Ok(json!({"ok":true,"printer":mac,"connection":"bluetooth-spp","bytes":written}));}
-        #[cfg(not(windows))]{let _=(mac,data);return Err("WINDOWS_BLUETOOTH_THERMAL_PRINT_ONLY".into());}
-    }
-    // Bluetooth SPP virtual COM transport. This is frequently the most reliable
-    // path for low-cost ESC/POS printers that expose an outbound COM port.
-    if let Some(port)=printer.strip_prefix("__BLUETOOTH_COM__|"){
-        if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())}
-        #[cfg(windows)]{let written=print_bluetooth_com(port,&data)?;return Ok(json!({"ok":true,"printer":port,"connection":"bluetooth-com","bytes":written}));}
-        #[cfg(not(windows))]{let _=(port,data);return Err("WINDOWS_BLUETOOTH_COM_THERMAL_PRINT_ONLY".into());}
-    }
-    if printer.trim().is_empty(){return Err("PRINTER_NAME_REQUIRED".into())}
-    if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())}
+    drop(app);
+    if printer=="__DISCOVER__"{#[cfg(windows)] unsafe{return Ok(json!({"ok":true,"printers":enumerate_printers()?}));}#[cfg(not(windows))]{return Ok(json!({"ok":true,"printers":[]}));}}
+    if printer=="__BLUETOOTH_DISCOVER__"{#[cfg(windows)]{return Ok(json!({"ok":true,"devices":enumerate_bluetooth_devices()?}));}#[cfg(not(windows))]{return Ok(json!({"ok":true,"devices":[]}));}}
+    if let Some(mac)=printer.strip_prefix("__BLUETOOTH_RAW__|"){if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())}#[cfg(windows)]{let written=print_bluetooth_spp(mac,&data)?;return Ok(json!({"ok":true,"printer":mac,"connection":"bluetooth-spp","bytes":written}));}#[cfg(not(windows))]{let _=(mac,data);return Err("WINDOWS_BLUETOOTH_THERMAL_PRINT_ONLY".into());}}
+    if let Some(port)=printer.strip_prefix("__BLUETOOTH_COM__|"){if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())}#[cfg(windows)]{let written=print_bluetooth_com(port,&data)?;return Ok(json!({"ok":true,"printer":port,"connection":"bluetooth-com","bytes":written}));}#[cfg(not(windows))]{let _=(port,data);return Err("WINDOWS_BLUETOOTH_COM_THERMAL_PRINT_ONLY".into());}}
+    if let Some(target)=printer.strip_prefix("__NETWORK_RAW__|"){let written=print_network_raw(target,&data)?;return Ok(json!({"ok":true,"printer":target,"connection":"network-raw","bytes":written}));}
+    if printer.trim().is_empty(){return Err("PRINTER_NAME_REQUIRED".into())} if data.is_empty(){return Err("PRINT_DATA_EMPTY".into())}
     #[cfg(not(windows))]{let _=(printer,data);return Err("WINDOWS_THERMAL_PRINT_ONLY".into());}
-    #[cfg(windows)]
-    unsafe{
+    #[cfg(windows)] unsafe{
         let mut name=wide(&printer);let mut handle:Handle=std::ptr::null_mut();
         if OpenPrinterW(name.as_mut_ptr(),&mut handle,std::ptr::null_mut())==0||handle.is_null(){return Err(format!("PRINTER_OPEN_FAILED: {}",std::io::Error::last_os_error()));}
         let doc=wide("MK FOODS POS Thermal Receipt");let dtype=wide("RAW");let mut info=DocInfo1{doc_name:doc.as_ptr(),output_file:std::ptr::null(),data_type:dtype.as_ptr()};
