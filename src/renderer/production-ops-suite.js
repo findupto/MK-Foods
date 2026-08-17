@@ -1,0 +1,22 @@
+(()=>{'use strict';
+const KEY='mkfoods.ops.v1';
+const load=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'{}')}catch{return {}}};
+const s=Object.assign({schema:1,stockLedger:[],refunds:[],voids:[],printQueue:[],kitchenTimers:{},metrics:[]},load());
+const save=()=>localStorage.setItem(KEY,JSON.stringify(s));
+const now=()=>new Date().toISOString(); const id=p=>`${p}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+const user=()=>window.session?.username||window.currentUser?.username||'system';
+const role=()=>window.session?.role||window.currentUser?.role||'Cashier';
+const manager=()=>['Admin','Owner','Manager'].includes(role());
+const audit=(action,data={})=>{window.mkFoodsIntegrity?.record?.(data.orderId,action,{by:user(),role:role(),...data})};
+function stockMove(ingredientId,qty,type,reason='',reference=''){const q=Number(qty);if(!ingredientId||!Number.isFinite(q)||q===0)throw Error('INVALID_STOCK_MOVEMENT');const e={id:id('STK'),ingredientId,qty:q,type,reason,reference,by:user(),at:now()};s.stockLedger.push(e);s.stockLedger=s.stockLedger.slice(-10000);save();return e}
+function authorize(action){if(manager())return true;throw Error(`MANAGER_APPROVAL_REQUIRED:${action}`)}
+function refund(orderId,amount,reason=''){authorize('REFUND');const o=window.db?.orders?.find(x=>x.id===orderId);if(!o)throw Error('ORDER_NOT_FOUND');const a=Number(amount);if(!Number.isFinite(a)||a<=0||a>Number(o.total||0)+.005)throw Error('INVALID_REFUND');const r={id:id('REF'),orderId,amount:a,reason,by:user(),at:now()};s.refunds.push(r);o.paymentStatus=a+.005>=Number(o.total||0)?'refunded':'partial_refund';o.refundedAmount=Number(o.refundedAmount||0)+a;o.updatedAt=r.at;save();window.mkFoodsIntegrity?.record?.(orderId,'REFUND',{amount:a,reason});return r}
+function voidOrder(orderId,reason=''){authorize('VOID');const o=window.db?.orders?.find(x=>x.id===orderId);if(!o)throw Error('ORDER_NOT_FOUND');if(['completed','paid','refunded'].includes(o.status)||o.paymentStatus==='paid')throw Error('PAID_ORDER_REQUIRES_REFUND');o.status='voided';o.voidedAt=now();o.voidReason=reason;o.voidedBy=user();const v={id:id('VOID'),orderId,reason,by:user(),at:o.voidedAt};s.voids.push(v);save();window.mkFoodsIntegrity?.record?.(orderId,'VOID',{reason});return v}
+function enqueuePrint(job){if(!job?.id)throw Error('PRINT_JOB_ID_REQUIRED');const exists=s.printQueue.find(x=>x.id===job.id&&x.documentType===job.documentType);if(exists)return exists;const j={...job,status:'queued',attempts:0,createdAt:now(),updatedAt:now()};s.printQueue.push(j);s.printQueue=s.printQueue.slice(-2000);save();return j}
+function failPrint(id,error){const j=s.printQueue.find(x=>x.id===id);if(!j)return null;j.attempts++;j.status=j.attempts>=3?'failed':'retry';j.error=String(error||'Unknown print error');j.updatedAt=now();save();return j}
+function completePrint(id){const j=s.printQueue.find(x=>x.id===id);if(!j)return null;j.status='printed';j.printedAt=now();j.updatedAt=j.printedAt;save();return j}
+function kitchenStart(orderId){const o=window.db?.orders?.find(x=>x.id===orderId);if(!o)throw Error('ORDER_NOT_FOUND');s.kitchenTimers[orderId]={orderId,startedAt:now(),startedBy:user(),status:'preparing'};o.workflowStatus='preparing';o.updatedAt=now();save();return s.kitchenTimers[orderId]}
+function kitchenReady(orderId){const t=s.kitchenTimers[orderId];if(!t)throw Error('KITCHEN_TIMER_NOT_FOUND');t.readyAt=now();t.readyBy=user();t.status='ready';const o=window.db?.orders?.find(x=>x.id===orderId);if(o){o.workflowStatus='ready';o.updatedAt=t.readyAt}save();return {...t,elapsedMs:new Date(t.readyAt)-new Date(t.startedAt)}}
+function metrics(){const os=Array.isArray(window.db?.orders)?window.db.orders:[];const completed=os.filter(o=>['completed','paid'].includes(o.status)||o.paymentStatus==='paid');const revenue=completed.reduce((n,o)=>n+Number(o.total||0),0);const prep=Object.values(s.kitchenTimers).filter(x=>x.startedAt&&x.readyAt);const avgPrep=prep.length?prep.reduce((n,x)=>n+(new Date(x.readyAt)-new Date(x.startedAt)),0)/prep.length:0;const m={at:now(),orders:os.length,completed:completed.length,revenue,avgPrepMs:avgPrep,queuedPrints:s.printQueue.filter(x=>['queued','retry'].includes(x.status)).length,failedPrints:s.printQueue.filter(x=>x.status==='failed').length,stockMoves:s.stockLedger.length};s.metrics.unshift(m);s.metrics=s.metrics.slice(0,100);save();return m}
+window.mkFoodsOps={state:()=>JSON.parse(JSON.stringify(s)),stockMove,refund,voidOrder,enqueuePrint,failPrint,completePrint,kitchenStart,kitchenReady,metrics};
+})();
