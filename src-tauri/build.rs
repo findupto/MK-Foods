@@ -4,8 +4,8 @@ fn main() {
     // Keep the native command surface canonical: printer commands live in
     // printer.rs. Older main.rs snapshots contained duplicate local printer
     // commands; normalize that source before rustc sees it.
-    let path = Path::new("src/main.rs");
-    if let Ok(mut src) = fs::read_to_string(path) {
+    let main_path = Path::new("src/main.rs");
+    if let Ok(mut src) = fs::read_to_string(main_path) {
         let before = src.clone();
         src = strip_command(&src, "discover_printers");
         src = strip_command(&src, "connect_printer");
@@ -14,9 +14,23 @@ fn main() {
             "printer::discover_printers,printer::connect_printer,printer::print_thermal",
         );
         if src != before {
-            fs::write(path, src).expect("failed to normalize native printer commands");
+            fs::write(main_path, src).expect("failed to normalize native printer commands");
         }
     }
+
+    // The shared printer module exposes enumerate_printers as an unsafe Win32
+    // wrapper. Keep every call site explicit so newer Rust compilers reject no
+    // hidden unsafe operation.
+    let printer_path = Path::new("src/printer.rs");
+    if let Ok(mut src) = fs::read_to_string(printer_path) {
+        let old = "if printer==\"__DISCOVER__\"{return Ok(json!({\"ok\":true,\"printers\":enumerate_printers()?}))}";
+        let new = "if printer==\"__DISCOVER__\"{return Ok(json!({\"ok\":true,\"printers\":unsafe{enumerate_printers()?}}))}";
+        if src.contains(old) {
+            src = src.replace(old, new);
+            fs::write(printer_path, src).expect("failed to normalize printer discovery safety");
+        }
+    }
+
     tauri_build::build()
 }
 
