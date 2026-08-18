@@ -8,8 +8,9 @@
   "scripts": {
     "start": "tauri dev",
     "dev": "tauri dev",
-    "test": "node test/project-integrity.test.js && node --check src/renderer/printers.js && node test/store.test.js && node test/smoke.test.js && node test/production.test.js && node test/workflow.test.js && node test/enterprise.test.js && node test/api.test.js && node test/production-hardening.test.js && node test/finalization.test.js && node test/finalization-regression.test.js && node test/printer-contract.test.js",
+    "test": "node test/project-integrity.test.js && node --check src/renderer/printers.js && node src/core/pos-domain.js && node test/pos-domain.test.js && node test/store.test.js && node test/smoke.test.js && node test/production.test.js && node test/workflow.test.js && node test/enterprise.test.js && node test/api.test.js && node test/production-hardening.test.js && node test/finalization.test.js && node test/finalization-regression.test.js && node test/printer-contract.test.js",
     "test:integrity": "node test/project-integrity.test.js",
+    "test:domain": "node src/core/pos-domain.js && node test/pos-domain.test.js",
     "test:enterprise": "node test/enterprise.test.js",
     "test:api": "node test/api.test.js",
     "test:workflow": "node test/workflow.test.js && node --check src/renderer/order-workflow.js",
