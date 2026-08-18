@@ -1,6 +1,6 @@
 {
   "name": "mk-foods-pos",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Offline-first Enterprise POS for MK Pizza & Ice Bar",
   "author": "MK Foods",
   "license": "MIT",
@@ -8,9 +8,9 @@
   "scripts": {
     "start": "tauri dev",
     "dev": "tauri dev",
-    "test": "node test/project-integrity.test.js && node --check src/renderer/printers.js && node src/core/pos-domain.js && node test/pos-domain.test.js && node test/store.test.js && node test/smoke.test.js && node test/production.test.js && node test/workflow.test.js && node test/enterprise.test.js && node test/api.test.js && node test/production-hardening.test.js && node test/finalization.test.js && node test/finalization-regression.test.js && node test/printer-contract.test.js",
+    "test": "node test/project-integrity.test.js && node --check src/renderer/printers.js && node src/core/pos-domain.js && node test/pos-domain.test.js && node test/enterprise-domain.test.js && node test/store.test.js && node test/smoke.test.js && node test/production.test.js && node test/workflow.test.js && node test/enterprise.test.js && node test/api.test.js && node test/production-hardening.test.js && node test/finalization.test.js && node test/finalization-regression.test.js && node test/printer-contract.test.js",
     "test:integrity": "node test/project-integrity.test.js",
-    "test:domain": "node src/core/pos-domain.js && node test/pos-domain.test.js",
+    "test:domain": "node src/core/pos-domain.js && node test/pos-domain.test.js && node test/enterprise-domain.test.js",
     "test:enterprise": "node test/enterprise.test.js",
     "test:api": "node test/api.test.js",
     "test:workflow": "node test/workflow.test.js && node --check src/renderer/order-workflow.js",
@@ -23,10 +23,6 @@
     "install-app": "npm install --include=dev",
     "postinstall": "node scripts/vendor-niimbot.js"
   },
-  "dependencies": {
-    "@mmote/niimbluelib": "0.0.1-alpha.43"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
-  }
+  "dependencies": {"@mmote/niimbluelib":"0.0.1-alpha.43"},
+  "devDependencies": {"@tauri-apps/cli":"^2.11.4"}
 }
