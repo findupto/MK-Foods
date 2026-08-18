@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('assert');
+const d=require('../src/core/enterprise-domain');
+let stock=[{id:'P1',stock:10,reorderLevel:3}];
+d.stockMovement(stock,{productId:'P1',quantity:2,type:'sale',reference:'O1'}); assert.strictEqual(stock[0].stock,8);
+const po=d.createPurchase({supplierId:'S1',items:[{productId:'P1',qty:5,unitCost:2}]}); d.receivePurchase(stock,po); assert.strictEqual(stock[0].stock,13);
+const customer=d.createCustomer({name:'Test'}); d.addLoyalty(customer,20,'sale'); assert.strictEqual(customer.loyaltyPoints,20);
+const shift=d.openShift({registerId:'R1',employeeId:'E1',openingCash:100}); d.recordShiftCash(shift,{type:'sale',amount:50}); d.closeShift(shift,150); assert.strictEqual(shift.varianceCents,0);
+const ledger=[]; d.postJournal({memo:'test',lines:[{account:'cash',type:'debit',amount:10},{account:'sales',type:'credit',amount:10}]},ledger); assert.strictEqual(ledger.length,1);
+assert.throws(()=>d.postJournal({lines:[{account:'cash',type:'debit',amount:10},{account:'sales',type:'credit',amount:9}]},ledger),/balanced/);
+const dash=d.dashboard({orders:[{stage:'completed',totalCents:1000}],products:stock,customers:[customer],shifts:[shift],ledger}); assert.strictEqual(dash.sales,10); assert.strictEqual(dash.lowStock,0);
+console.log('MK Foods enterprise domain tests passed');
