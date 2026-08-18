@@ -10,11 +10,23 @@ license = "MIT"
 tauri-build = "2"
 
 [dependencies]
+anyhow = "1"
+argon2 = "0.5"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+hex = "0.4"
+pbkdf2 = "0.12"
+rand = "0.8"
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2.6"
 tauri = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-log = { version = "2", features = ["colored"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", features = ["clock", "serde"] }
-
-# Cryptography & Security
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+zeroize = "1"
