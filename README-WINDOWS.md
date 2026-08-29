@@ -1,5 +1,37 @@
 # MK Foods POS - Windows Build
 
+## Runtime architecture
+
+MK Foods POS is a **Tauri 2** desktop application. It does not use Electron or Vite as its desktop runtime.
+
+Before starting development, run:
+
+`npm run verify:runtime`
+
+This verifies the Node version, Tauri CLI dependency and the absence of Electron/Vite runtime contamination.
+
+If an older checkout still reports commands such as `electron .`, `electron:dev`, `vite --host` or a package name other than `mk-foods-pos`, update the checkout to the current `main` branch before reinstalling dependencies.
+
+For a stale Windows dependency tree, after confirming any local work is backed up, use:
+
+`git fetch origin`
+
+`git checkout main`
+
+`git pull --ff-only origin main`
+
+`rmdir /s /q node_modules`
+
+`del /q package-lock.json 2>nul`
+
+`npm install --include=dev`
+
+`npm run verify:runtime`
+
+`npm run dev`
+
+Do **not** run `npm audit fix --force` as a repair step; it can introduce unrelated breaking dependency upgrades.
+
 ## One-click installer build
 
 From the project folder, double-click:
